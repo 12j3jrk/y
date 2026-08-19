@@ -1,222 +1,176 @@
--- Roblox Script (ServerScriptService or inside a tool)
+-- StarterPlayerScripts > LocalScript
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local BirdsFolder = ReplicatedStorage:WaitForChild("Birds")
+local player = Players.LocalPlayer
+local Birds = ReplicatedStorage:WaitForChild("Birds")
 
-local PelicanTemplate = BirdsFolder:WaitForChild("Pelican")
-local PenguinTemplate = BirdsFolder:WaitForChild("PenguinChick")
+local PelicanTemplate = Birds:WaitForChild("Pelican")
+local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
-local function setAllBlack(model)
+-- ====== EDIT THESE ======
+local BEAK_NAME = "Beak" -- change to the exact part/attachment name in your Pelican model
+local PELICAN_SCALE = 20 -- "super large"
+local NECK_SCALE = 10 -- scale penguins to look big/long like pelican
+local PENGUINS = 10
+
+-- how far neck stretches (studs)
+local NECK_LENGTH = 200
+
+-- very slow motion amount
+local ROT_SPEED = 0.08
+local SWAY_SPEED = 0.05
+-- =======================
+
+local function setBlackDeep(model)
 	for _, inst in ipairs(model:GetDescendants()) do
 		if inst:IsA("BasePart") then
 			inst.Color = Color3.new(0, 0, 0)
-			inst.Material = Enum.Material.SmoothPlastic
-		elseif inst:IsA("MeshPart") then
-			-- MeshPart is also BasePart, but kept for clarity
-			inst.Color = Color3.new(0, 0, 0)
-		elseif inst:IsA("Decal") then
-			-- Decals can't always be recolored; remove for a clean black look
-			inst.Transparency = 1
-		end
-	end
-end
-
-local function findBeakCFrame(pelicanModel)
-	-- Try common naming patterns
-	local candidates = {
-		"Beak", "beak", "Mouth", "mouth", "Head", "head",
-		"PelicanBeak", "PelicanMouth", "BeakAttachment", "MouthAttachment"
-	}
-
-	for _, name in ipairs(candidates) do
-		local inst = pelicanModel:FindFirstChild(name, true)
-		if inst then
-			if inst:IsA("Attachment") then
-				return inst.WorldCFrame
-			elseif inst:IsA("BasePart") then
-				return inst.CFrame
+			-- optional: make it solid-looking
+			if inst.Material ~= Enum.Material.Neon then
+				inst.Material = Enum.Material.SmoothPlastic
 			end
+		elseif inst:IsA("MeshPart") then
+			inst.Color = Color3.new(0, 0, 0)
+			inst.Material = Enum.Material.SmoothPlastic
+		end
+	end
+end
+
+local function findBeakPivot(model)
+	-- Try: named part first
+	local byName = model:FindFirstChild(BEAK_NAME, true)
+	if byName then
+		if byName:IsA("BasePart") then
+			return byName.CFrame
+		elseif byName:IsA("Attachment") then
+			return byName.WorldCFrame
 		end
 	end
 
-	-- Fallbacks
-	if pelicanModel.PrimaryPart then
-		return pelicanModel.PrimaryPart.CFrame
-	end
-
-	local anyPart = pelicanModel:FindFirstChildWhichIsA("BasePart", true)
-	if anyPart then
-		return anyPart.CFrame
-	end
-
-	return pelicanModel:GetPivot()
+	-- Fallback: model pivot
+	return model:GetPivot()
 end
 
-local function cloneAndSizePelicanToPlayer(pelicanModel, player, veryLargeScale)
-	local clone = pelicanModel:Clone()
-	clone.Parent = workspace
-
-	setAllBlack(clone)
-
-	-- Make super large
-	clone:PivotTo(player.Character.HumanoidRootPart.CFrame)
-
-	-- Scale model via Pivot and applying scale to each BasePart (no native model scaling in all cases)
-	-- We'll scale by adjusting each BasePart size/position relative to pivot.
-	local pivot = clone:GetPivot()
-	for _, inst in ipairs(clone:GetDescendants()) do
+local function scaleModelParts(model, scale)
+	-- robust scaling for most static models: scale each BasePart about model pivot
+	local pivot = model:GetPivot()
+	for _, inst in ipairs(model:GetDescendants()) do
 		if inst:IsA("BasePart") then
 			-- scale size
-			inst.Size = inst.Size * veryLargeScale
+			inst.Size = inst.Size * scale
 
-			-- move position relative to pivot
-			local rel = pivot:ToObjectSpace(inst.CFrame)
-			-- scale translation component
-			local newRel = CFrame.new(rel.Position * veryLargeScale) * CFrame.fromMatrix(rel.Position * 0, rel.Rotation.XVector, rel.Rotation.YVector, rel.Rotation.ZVector)
-			-- preserve orientation using original rotation:
-			local rot = CFrame.fromMatrix(Vector3.zero, rel.Rotation.XVector, rel.Rotation.YVector, rel.Rotation.ZVector)
-			inst.CFrame = pivot * CFrame.new(rel.Position * veryLargeScale) * rot
+			-- scale position offset from pivot
+			local rel = pivot:PointToObjectSpace(inst.Position)
+			inst.CFrame = pivot * CFrame.new(rel * scale) * (inst.CFrame - inst.CFrame.Position)
 		end
 	end
+end
+
+local function makePelicanForPlayer()
+	local char = player.Character
+	if not char then return end
+
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	local clone = PelicanTemplate:Clone()
+	clone.Parent = workspace
+
+	-- make black
+	setBlackDeep(clone)
+
+	-- scale pelican
+	scaleModelParts(clone, PELICAN_SCALE)
+
+	-- place on player
+	clone:PivotTo(hrp.CFrame)
 
 	return clone
 end
 
-local function placePenguinNeckStack({
-	pelicanClone,
-	player,
-	penguinCount,
-	beakCFrame,
-	neckLength,
-	spreadAngle,
-	moveSpeed
-})
-	-- Create a folder for organization
-	local folder = Instance.new("Folder")
-	folder.Name = "PenguinNeckStack"
-	folder.Parent = workspace
+local function animatePenguinNeck(pelicanModel)
+	local beakCF = findBeakPivot(pelicanModel)
 
-	-- We'll build a “chain”: each penguin follows the previous one,
-	-- and the whole chain subtly oscillates/rotates very slowly.
-	local base = beakCFrame
+	-- use pelican forward direction
+	local forward = beakCF.LookVector
+	local up = beakCF.UpVector
 
-	-- Decide forward direction (pelican look direction)
-	-- Use pelican's pivot orientation
-	local pelicanLook = pelicanClone:GetPivot().LookVector
-	local forward = pelicanLook.Unit
-	local up = base.UpVector
-
-	-- Start with a “target” direction that slowly rotates
-	local timeStart = os.clock()
-
-	local lastCFrame = base
-
-	-- Keep a small offset so penguins appear like stacked on beaks position
-	local step = neckLength / math.max(1, penguinCount - 1)
+	local container = Instance.new("Folder")
+	container.Name = "ClientNeckStack"
+	container.Parent = workspace
 
 	local penguins = {}
+	local step = NECK_LENGTH / math.max(1, (PENGUINS - 1))
 
-	for i = 1, penguinCount do
+	for i = 1, PENGUINS do
 		local p = PenguinTemplate:Clone()
-		p.Name = "Penguin_" .. i
-		p.Parent = folder
+		p.Name = ("Penguin_%d"):format(i)
+		p.Parent = container
 
-		-- Ensure we can move it: pick a PrimaryPart or any BasePart
-		local part = p.PrimaryPart or p:FindFirstChildWhichIsA("BasePart", true)
-		if not part then
-			p:Destroy()
-			continue
-		end
-
-		-- Make penguins long/large like the pelican? If you want even bigger,
-		-- increase this. Otherwise keep at default.
-		-- We'll scale moderately; you can change it.
-		local penguinScale = 10 -- adjust if you want them huge
-		local pivot = p:GetPivot()
-
+		-- scale penguin bigger so it looks like it matches big pelican
 		for _, inst in ipairs(p:GetDescendants()) do
 			if inst:IsA("BasePart") then
-				inst.Size = inst.Size * penguinScale
+				inst.Size = inst.Size * NECK_SCALE
 			end
 		end
 
-		-- Initial placement: along forward direction from beak
-		local offset = forward * (-step * (i - 1))
-		local cf = base * CFrame.new(offset)
+		-- place along a line extending from beak
+		local dist = step * (i - 1)
+		local offsetCF = beakCF * CFrame.new(-forward * dist)
 
-		p:PivotTo(cf)
+		p:PivotTo(offsetCF)
 		table.insert(penguins, p)
-
-		lastCFrame = cf
 	end
 
-	-- Animation loop: very slow move + rotate, still connected
+	-- slow connected neck motion:
 	task.spawn(function()
-		while pelicanClone.Parent do
-			local t = (os.clock() - timeStart)
+		local t0 = os.clock()
+		while pelicanModel.Parent do
+			local t = os.clock() - t0
 
-			-- Very slow oscillation
-			local rotWave = math.sin(t * moveSpeed) * spreadAngle
-			local rotWave2 = math.cos(t * (moveSpeed * 0.7)) * (spreadAngle * 0.5)
+			-- tiny overall rotate and slow sway
+			local globalYaw = math.sin(t * ROT_SPEED) * 0.35
+			local globalPitch = math.cos(t * ROT_SPEED * 0.7) * 0.25
+			local sway = math.sin(t * SWAY_SPEED) * 0.15
 
-			-- Build a target rotation around the beak base
-			-- Use local axes so it looks like a neck twisting
-			local twistRot = CFrame.Angles(rotWave, rotWave2, 0)
-
-			local currentBase = base * twistRot
-
-			-- Move/rotate each segment so it stays connected
 			for i, p in ipairs(penguins) do
-				if not p.Parent then break end
-				local stepOffset = step * (i - 1)
-				-- Add slight curvature so it looks like a neck stacking
-				local bend = math.sin(t * moveSpeed + i * 0.35) * (0.15 + i * 0.01)
+				local alpha = (i - 1) / math.max(1, (PENGUINS - 1)) -- 0..1 along neck
+				local dist = step * (i - 1)
 
-				local segForward = (forward * (-stepOffset))
-				local bendRot = CFrame.Angles(0, bend * rotWave * 0.4, bend * 0.25)
+				-- make farther segments move slightly more (still connected)
+				local segYaw = globalYaw * alpha
+				local segPitch = globalPitch * alpha
+				local segRoll = sway * alpha
 
-				-- Each segment attaches to the previous with a tiny smoothing
-				local targetCF = currentBase * bendRot * CFrame.new(segForward)
+				-- curve: segments bend subtly as they extend
+				local bend = math.sin(t * (ROT_SPEED + 0.01) + i * 0.4) * 0.1 * alpha
 
-				-- Lerp for smooth super-slow motion
-				local currentCF = p:GetPivot()
-				p:PivotTo(currentCF:Lerp(targetCF, 0.03))
+				local target = beakCF
+					* CFrame.Angles(segPitch, segYaw, segRoll + bend)
+					* CFrame.new(-forward * dist)
+
+				-- smoothing so it looks super slow and connected
+				local current = p:GetPivot()
+				p:PivotTo(current:Lerp(target, 0.03))
 			end
 
 			task.wait(0.03)
 		end
 	end)
-
-	return folder
 end
 
--- MAIN
--- Example: spawn when a player joins (or you can call this from a remote event)
-game.Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function()
-		task.wait(0.2)
-		local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-		if not hrp then return end
+-- run
+local function start()
+	local pelican = makePelicanForPlayer()
+	if pelican then
+		animatePenguinNeck(pelican)
+	end
+end
 
-		local veryLargeScale = 20 -- super large pelican (adjust)
-		local pelicanClone = cloneAndSizePelicanToPlayer(PelicanTemplate, player, veryLargeScale)
+start()
 
-		-- Make sure it "goes to player position"
-		pelicanClone:PivotTo(hrp.CFrame)
-
-		-- Find beak position
-		local beakCF = findBeakCFrame(pelicanClone)
-
-		-- Penguin neck settings
-		placePenguinNeckStack({
-			pelicanClone = pelicanClone,
-			player = player,
-			penguinCount = 10,
-			beakCFrame = beakCF,
-			neckLength = 200,      -- how long the neck extends
-			spreadAngle = 1.2,     -- rotation intensity (keep small for subtle)
-			moveSpeed = 0.08        -- very slow
-		})
-	end)
+player.CharacterAdded:Connect(function()
+	task.wait(0.2)
+	start()
 end)
-
