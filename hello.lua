@@ -1,15 +1,21 @@
--- StarterPlayerScripts (LocalScript) - LOCAL ONLY
+-- LocalScript only (LOCAL ONLY)
+-- Put this in: StarterPlayerScripts
+-- It creates the GUI and plays a LOOPED animation chosen by TextBox.
+-- It loads the Animation onto the Animator found anywhere under your character
+-- (including if it's inside a nested Model).
+
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- GUI
+-- ===== GUI =====
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "LocalAnimLoopPlayerGUI"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
 local frame = Instance.new("Frame")
+frame.Name = "Frame"
 frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 frame.BackgroundTransparency = 0.15
 frame.BorderSizePixel = 0
@@ -18,6 +24,7 @@ frame.Position = UDim2.new(0, 20, 0, 60)
 frame.Parent = screenGui
 
 local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "StatusLabel"
 statusLabel.BackgroundTransparency = 1
 statusLabel.TextColor3 = Color3.fromRGB(230, 230, 230)
 statusLabel.Font = Enum.Font.Gotham
@@ -29,6 +36,7 @@ statusLabel.Text = "Enter AnimationId and press Play."
 statusLabel.Parent = frame
 
 local animBox = Instance.new("TextBox")
+animBox.Name = "AnimIdBox"
 animBox.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 animBox.BackgroundTransparency = 0.1
 animBox.BorderSizePixel = 0
@@ -42,20 +50,22 @@ animBox.Position = UDim2.fromOffset(10, 30)
 animBox.Parent = frame
 
 local playButton = Instance.new("TextButton")
+playButton.Name = "PlayButton"
 playButton.BackgroundColor3 = Color3.fromRGB(70, 140, 255)
 playButton.BorderSizePixel = 0
 playButton.AutoButtonColor = true
 playButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 playButton.Font = Enum.Font.GothamBold
 playButton.TextSize = 16
-playButton.Text = "Play Loop (Override)"
+playButton.Text = "Play Loop"
 playButton.Size = UDim2.fromOffset(330, 40)
 playButton.Position = UDim2.fromOffset(10, 75)
 playButton.Parent = frame
 
--- Logic
-local currentTrack = nil
-local stopToken = 0
+-- ===== Animation Logic (LOCAL ONLY) =====
+local currentTrack : AnimationTrack? = nil
+local currentAnimator : Animator? = nil
+local currentAnimId : number? = nil
 
 local function setStatus(msg)
 	statusLabel.Text = msg
@@ -64,74 +74,92 @@ end
 local function normalizeAnimId(input)
 	local s = tostring(input or ""):gsub("%s+", "")
 	if s == "" then return nil end
+
 	local id = s:match("rbxassetid://(%d+)")
 	if not id then id = s:match("asset/%?id=(%d+)") end
 	if not id then id = s:match("(%d+)") end
-	return id and tonumber(id) or nil
+
+	if not id then return nil end
+	return tonumber(id)
 end
 
-local function findAnimatorAnywhere(character)
-	-- This is the important part:
-	-- It finds the Animator wherever it is (including inside your nested Model).
-	local animator = character:FindFirstChildWhichIsA("Animator", true)
-	if animator then return animator end
-	return nil
+local function getAnimator(character)
+	-- Finds ANY Animator anywhere under your character (including nested Models).
+	if not character then return nil end
+	return character:FindFirstChildWhichIsA("Animator", true)
 end
 
 local function stopCurrent()
 	if currentTrack then
-		currentTrack:Stop(0)
-		currentTrack = nil
+		pcall(function() currentTrack:Stop(0) end)
 	end
+	currentTrack = nil
+	currentAnimator = nil
 end
 
-local function playLoop(animIdNumber)
+local function ensureCharacterAndAnimatorAndPlay(animIdNumber)
+	currentAnimId = animIdNumber
 	local character = player.Character
 	if not character then
-		setStatus("No character.")
+		setStatus("No character yet.")
 		return
 	end
 
-	local animator = findAnimatorAnywhere(character)
-	if not animator then
-		setStatus("No Animator found anywhere under character.")
-		return
-	end
-
-	stopToken += 1
-	local myToken = stopToken
-
+	setStatus("Finding Animator...")
 	stopCurrent()
+
+	-- Animator can appear a moment later due to rig loading / nested model placement.
+	local animator = nil
+	for _ = 1, 30 do
+		animator = getAnimator(character)
+		if animator then break end
+		task.wait(0.1)
+	end
+
+	if not animator then
+		setStatus("Animator not found under character.")
+		return
+	end
+
+	currentAnimator = animator
 
 	local anim = Instance.new("Animation")
 	anim.AnimationId = ("rbxassetid://%d"):format(animIdNumber)
 
-	local track = animator:LoadAnimation(anim)
-	track.Looped = true
-	track.Priority = Enum.AnimationPriority.Action2
-	track:Play(0.05)
-
-	-- If a new play happens, stop the old one
-	if myToken ~= stopToken then
-		track:Stop(0)
+	local ok, trackOrErr = pcall(function()
+		return animator:LoadAnimation(anim)
+	end)
+	if not ok or not trackOrErr then
+		setStatus("LoadAnimation failed.")
 		return
 	end
 
-	currentTrack = track
+	currentTrack = trackOrErr
+	currentTrack.Looped = true
+	-- Action2 tends to win against default idle/walk on many rigs.
+	currentTrack.Priority = Enum.AnimationPriority.Action2
+	currentTrack:Play(0.05)
+
 	setStatus(("Playing %d (loop)"):format(animIdNumber))
 end
 
 playButton.MouseButton1Click:Connect(function()
 	local id = normalizeAnimId(animBox.Text)
 	if not id then
-		setStatus("Invalid animation id.")
+		setStatus("Invalid AnimationId.")
 		return
 	end
-	playLoop(id)
+	ensureCharacterAndAnimatorAndPlay(id)
 end)
 
 player.CharacterAdded:Connect(function()
-	stopToken += 1
+	-- Keep the UI; stop old track; re-play last animation if any.
 	stopCurrent()
-	setStatus("Respawned. Enter id and press Play.")
+	setStatus("Respawned. Re-loading...")
+	if currentAnimId then
+		task.wait(0.2)
+		ensureCharacterAndAnimatorAndPlay(currentAnimId)
+	else
+		setStatus("Enter an id and press Play.")
+	end
 end)
