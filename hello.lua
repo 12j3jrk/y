@@ -5,7 +5,7 @@
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-local sourceModel = Workspace:WaitForChild("Penguin") -- change this
+local sourceModel = Workspace:WaitForChild("PenguinChick") -- change this
 local clonesFolder = Workspace:FindFirstChild("Clones") or Instance.new("Folder")
 clonesFolder.Name = "Clones"
 clonesFolder.Parent = Workspace
