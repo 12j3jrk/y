@@ -1,212 +1,73 @@
--- StarterPlayerScripts > LocalScript
+-- StarterPlayerScripts/AnimationOverrideClient.lua
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local Birds = ReplicatedStorage:WaitForChild("Birds")
 
-local PelicanTemplate = Birds:WaitForChild("Pelican")
-local PenguinTemplate = Birds:WaitForChild("PenguinChick")
+-- ========= CONFIG =========
+-- Set this to the animation id you want (example: "rbxassetid://123456789")
+local ANIMATION_ID = "rbxassetid://INSERT_ANIMATION_ID_HERE"
+-- ==========================
 
--- Try to match the beak part/attachment name inside the Pelican model
-local BEAK_NAME = "Beak3"
-local FALLBACK_TO_MODEL_PIVOT = true
+local function getAnimationTrack(controller)
+	-- Create Animation instance and load it on the controller
+	local anim = Instance.new("Animation")
+	anim.AnimationId = ANIMATION_ID
+	return controller:LoadAnimation(anim)
+end
 
--- Tuning
-local PELICAN_SCALE = 20
-local PENGUIN_SCALE = 10
-local NECK_COUNT = 30
-
-local NECK_LENGTH = 250 -- used as overall length target
-local UPDATE_DT = 0.02
-
--- "insane" motion tuning
-local INSANE_BASE_SPEED = 4.0     -- higher = faster changes
-local JITTER_STRENGTH = 3.5       -- positional randomness
-local ROT_INSANE_STRENGTH = 5.0    -- rotational randomness
-local SWAY_STRENGTH = 1.2
-
-local function setBlack(model)
-	for _, inst in ipairs(model:GetDescendants()) do
-		if inst:IsA("BasePart") then
-			inst.Color = Color3.new(0, 0, 0)
-			if inst.Material ~= Enum.Material.Neon then
-				inst.Material = Enum.Material.SmoothPlastic
-			end
-		elseif inst:IsA("Decal") then
-			inst.Transparency = 1
-		end
+local function stopAllTracks(controller)
+	-- On AnimationController, tracks are created via controller:LoadAnimation(...)
+	-- We'll track the one we create and stop it, and also stop any others we find.
+	-- (This is best-effort; if something else uses a different controller, it won't be affected.)
+	for _, track in ipairs(controller:GetPlayingAnimationTracks()) do
+		track:Stop(0)
 	end
 end
 
-local function getBeakCFrame(model)
-	local found = model:FindFirstChild(BEAK_NAME, true)
-	if found then
-		if found:IsA("Attachment") then
-			return found.WorldCFrame
-		elseif found:IsA("BasePart") then
-			return found.CFrame
-		end
-	end
-	if FALLBACK_TO_MODEL_PIVOT then
-		return model:GetPivot()
-	end
-	return model:GetPivot()
-end
-
-local function scaleModel(model, scale)
-	local pivot = model:GetPivot()
-	for _, inst in ipairs(model:GetDescendants()) do
-		if inst:IsA("BasePart") then
-			local relPos = pivot:PointToObjectSpace(inst.Position)
-			inst.Size = inst.Size * scale
-			-- Reposition translation; keep orientation
-			inst.CFrame = pivot * CFrame.new(relPos * scale) * (inst.CFrame - inst.CFrame.Position)
-		end
-	end
-end
-
-local function estimatePenguinSegmentStep(penguinTemplateClone)
-	-- Use bounding box depth along forward-ish axis approximation.
-	-- We'll just use its overall bounding box size magnitude to get a step.
-	local cf, size = penguinTemplateClone:GetBoundingBox()
-	-- A single scalar step that tends to prevent gaps.
-	-- Since we don't know exact neck direction, we use size.Z as a heuristic.
-	local step = math.max(1, (size.Y + size.Z) * 0.5)
-	return step
-end
-
-local function clonePelican()
-	local char = player.Character
-	if not char then return nil end
-	local hrp = char:FindFirstChild("HumanoidRootPart")
-	if not hrp then return nil end
-
-	local pelican = PelicanTemplate:Clone()
-	pelican.Name = "ClientPelican_" .. player.Name
-	pelican.Parent = workspace
-
-	setBlack(pelican)
-	scaleModel(pelican, PELICAN_SCALE)
-
-	-- Teleport immediately to player
-	pelican:PivotTo(hrp.CFrame)
-
-	return pelican
-end
-
-local function buildNeck(pelican)
-	local container = Instance.new("Folder")
-	container.Name = "ClientPenguinNeckStack"
-	container.Parent = pelican
-
-	local beakCF = getBeakCFrame(pelican)
-	local forward = beakCF.LookVector
-
-	-- Clone a temp penguin to estimate step so the stack doesn't leave gaps
-	local temp = PenguinTemplate:Clone()
-	setBlack(temp)
-	scaleModel(temp, PENGUIN_SCALE)
-	local segStep = estimatePenguinSegmentStep(temp)
-	temp:Destroy()
-
-	-- Decide overall length step distribution:
-	-- If NECK_LENGTH is shorter/longer than segStep*(count-1), we adjust.
-	local desiredTotal = NECK_LENGTH
-	local currentTotal = segStep * (NECK_COUNT - 1)
-	local lengthScale = (currentTotal > 0) and (desiredTotal / currentTotal) or 1
-	local step = segStep * lengthScale
-
-	-- Create penguins
-	local penguins = {}
-
-	for i = 1, NECK_COUNT do
-		local p = PenguinTemplate:Clone()
-		p.Name = ("Penguin_%02d"):format(i)
-		p.Parent = container
-
-		setBlack(p)
-		scaleModel(p, PENGUIN_SCALE)
-
-		local dist = step * (i - 1)
-		local targetCF = beakCF * CFrame.new(-forward * dist)
-		p:PivotTo(targetCF)
-
-		table.insert(penguins, p)
+local function setupForCharacter(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	-- Humanoid.AnimationController is where the tracks will live
+	local controller = humanoid:FindFirstChildOfClass("AnimationController")
+	if not controller then
+		controller = Instance.new("AnimationController")
+		controller.Name = "AnimationController"
+		controller.Parent = humanoid
 	end
 
-	-- Insane connected animation
+	local track = getAnimationTrack(controller)
+	track.Looped = true
+
+	-- Override behavior: stop other controller tracks, then play ours
+	stopAllTracks(controller)
+
+	-- Ensure the animation is playing
+	track:Play(0.1)
+
+	-- Keep re-enforcing if something else tries to start tracks on this controller
+	-- (lightweight loop, not per-frame heavy)
 	task.spawn(function()
-		local t0 = os.clock()
-		while pelican.Parent do
-			local t = os.clock() - t0
-			local currentBeak = getBeakCFrame(pelican)
-			local fwd = currentBeak.LookVector
-			local right = currentBeak.RightVector
-			local up = currentBeak.UpVector
-
-			-- fast jitter seed-ish changes
-			local baseYaw = math.sin(t * INSANE_BASE_SPEED * 1.1) * (0.6 + math.random() * 0.6)
-			local basePitch = math.cos(t * INSANE_BASE_SPEED * 0.9) * (0.4 + math.random() * 0.6)
-
-			-- For each segment, keep it anchored and still connected (no gaps)
-			for i, p in ipairs(penguins) do
-				if not p.Parent then break end
-
-				local alpha = (i - 1) / math.max(1, NECK_COUNT - 1)
-				local dist = step * (i - 1)
-
-				-- random shake (stronger for far segments)
-				local randX = (math.random() - 0.5) * 2
-				local randY = (math.random() - 0.5) * 2
-				local randZ = (math.random() - 0.5) * 2
-
-				local jitterPos = (right * randX + up * randY) * (JITTER_STRENGTH * (0.1 + alpha))
-				local jitterRotYaw = (math.sin(t * INSANE_BASE_SPEED + i * 0.25) + randZ) * (ROT_INSANE_STRENGTH * 0.02 * (0.2 + alpha))
-				local jitterRotRoll = (math.cos(t * INSANE_BASE_SPEED * 1.2 + i * 0.18) + randY) * (ROT_INSANE_STRENGTH * 0.02 * (0.2 + alpha))
-
-				-- curved/twisting neck
-				local sway = math.sin(t * (INSANE_BASE_SPEED * 0.8) + i * 0.35) * SWAY_STRENGTH * (0.05 + alpha)
-				local pitch = (basePitch * (0.2 + alpha)) + sway * 0.2
-				local yaw = (baseYaw * (0.2 + alpha)) + jitterRotYaw
-
-				-- keep spacing exact -> no gaps by using step-driven placement only
-				local target = currentBeak
-					* CFrame.Angles(pitch, yaw, jitterRotRoll)
-					* CFrame.new(-fwd * dist)
-					* CFrame.new(jitterPos)
-
-				-- fast smoothing so it looks chaotic but attached
-				local current = p:GetPivot()
-				p:PivotTo(current:Lerp(target, 0.18))
+		while character.Parent do
+			-- If our track isn’t playing, force it back
+			if not track.IsPlaying then
+				stopAllTracks(controller)
+				track:Play(0.1)
 			end
 
-			task.wait(UPDATE_DT)
+			-- Also keep it synced to be safe
+			RunService.Heartbeat:Wait()
 		end
 	end)
 end
 
-local function clearOld()
-	for _, inst in ipairs(workspace:GetChildren()) do
-		if inst:IsA("Model") and inst.Name == ("ClientPelican_" .. player.Name) then
-			inst:Destroy()
-		end
-	end
-end
-
-local function start()
-	clearOld()
-	local pelican = clonePelican()
-	if not pelican then return end
-	buildNeck(pelican)
-end
+player.CharacterAdded:Connect(function(character)
+	-- small delay so everything exists
+	task.wait(0.2)
+	setupForCharacter(character)
+end)
 
 if player.Character then
-	start()
-end
-
-player.CharacterAdded:Connect(function()
 	task.wait(0.2)
-	start()
-end)
+	setupForCharacter(player.Character)
+end
