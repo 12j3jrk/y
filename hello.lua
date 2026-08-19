@@ -1,271 +1,268 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
 
--- Get the animation controller from the model in the character
--- Adjust the path based on your model structure
-local animationControllerModel = character:WaitForChild("AnimationControllerModel") -- Change name as needed
-local animationController = animationControllerModel:WaitForChild("AnimationController")
+-- Get animation controller
+local animationController = character:WaitForChild("AnimationControllerModel"):WaitForChild("AnimationController")
 
--- Create the GUI
+-- Mobile detection
+if not UserInputService.TouchEnabled then
+    return
+end
+
+-- Create ScreenGui optimized for mobile
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AnimationPlayerGui"
 screenGui.ResetOnSpawn = false
 screenGui.SafeAreaCompatible = true
+screenGui.ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
--- Main frame
+-- Main frame (full screen, bottom sheet style)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 280, 0, 400)
-mainFrame.Position = UDim2.new(0.5, -140, 0.5, -200)
-mainFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 48)
+mainFrame.Size = UDim2.new(1, 0, 0, 500)
+mainFrame.Position = UDim2.new(0, 0, 1, -500)
+mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 38)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 
--- Add corner radius
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = mainFrame
+-- Top handle bar
+local handleBar = Instance.new("Frame")
+handleBar.Name = "HandleBar"
+handleBar.Size = UDim2.new(0, 50, 0, 4)
+handleBar.Position = UDim2.new(0.5, -25, 0, 8)
+handleBar.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
+handleBar.BorderSizePixel = 0
+handleBar.Parent = mainFrame
 
--- Add stroke
-local stroke = Instance.new("UIStroke")
-stroke.Color = Color3.fromRGB(100, 100, 100)
-stroke.Thickness = 2
-stroke.Parent = mainFrame
+local handleCorner = Instance.new("UICorner")
+handleCorner.CornerRadius = UDim.new(0, 2)
+handleCorner.Parent = handleBar
 
 -- Title
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, 0, 0, 40)
-title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+title.Size = UDim2.new(1, 0, 0, 50)
+title.Position = UDim2.new(0, 0, 0, 16)
+title.BackgroundTransparency = 1
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 18
+title.TextSize = 20
 title.Font = Enum.Font.GothamBold
 title.Text = "Animation Player"
-title.BorderSizePixel = 0
 title.Parent = mainFrame
 
-local titleCorner = Instance.new("UICorner")
-titleCorner.CornerRadius = UDim.new(0, 8)
-titleCorner.Parent = title
+-- Scroll frame for content
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Name = "ScrollFrame"
+scrollFrame.Size = UDim2.new(1, -20, 1, -80)
+scrollFrame.Position = UDim2.new(0, 10, 0, 66)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.BorderSizePixel = 0
+scrollFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+scrollFrame.CanUseMouseWheel = true
+scrollFrame.Parent = mainFrame
 
--- Padding container
-local paddingFrame = Instance.new("Frame")
-paddingFrame.Name = "PaddingFrame"
-paddingFrame.Size = UDim2.new(1, -20, 1, -60)
-paddingFrame.Position = UDim2.new(0, 10, 0, 50)
-paddingFrame.BackgroundTransparency = 1
-paddingFrame.Parent = mainFrame
-
--- UIListLayout
+-- List layout for scrolling content
 local listLayout = Instance.new("UIListLayout")
-listLayout.Padding = UDim.new(0, 8)
-listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+listLayout.Padding = UDim.new(0, 12)
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Parent = paddingFrame
+listLayout.Parent = scrollFrame
 
--- Animation ID TextBox
-local animationIdLabel = Instance.new("TextLabel")
-animationIdLabel.Name = "AnimationIdLabel"
-animationIdLabel.Size = UDim2.new(1, 0, 0, 20)
-animationIdLabel.BackgroundTransparency = 1
-animationIdLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-animationIdLabel.TextSize = 12
-animationIdLabel.Font = Enum.Font.Gotham
-animationIdLabel.Text = "Animation ID:"
-animationIdLabel.TextXAlignment = Enum.TextXAlignment.Left
-animationIdLabel.LayoutOrder = 1
-animationIdLabel.Parent = paddingFrame
+local listPadding = Instance.new("UIPadding")
+listPadding.PaddingLeft = UDim.new(0, 0)
+listPadding.PaddingRight = UDim.new(0, 0)
+listPadding.PaddingTop = UDim.new(0, 8)
+listPadding.PaddingBottom = UDim.new(0, 8)
+listPadding.Parent = scrollFrame
 
-local animationIdBox = Instance.new("TextBox")
-animationIdBox.Name = "AnimationIdBox"
-animationIdBox.Size = UDim2.new(1, 0, 0, 32)
-animationIdBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-animationIdBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-animationIdBox.TextSize = 14
-animationIdBox.Font = Enum.Font.Gotham
-animationIdBox.PlaceholderText = "rbxassetid://..."
-animationIdBox.BorderSizePixel = 0
-animationIdBox.LayoutOrder = 2
-animationIdBox.Parent = paddingFrame
-
-local boxCorner = Instance.new("UICorner")
-boxCorner.CornerRadius = UDim.new(0, 6)
-boxCorner.Parent = animationIdBox
-
--- Animation Speed Label and Input
-local speedLabel = Instance.new("TextLabel")
-speedLabel.Name = "SpeedLabel"
-speedLabel.Size = UDim2.new(1, 0, 0, 20)
-speedLabel.BackgroundTransparency = 1
-speedLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-speedLabel.TextSize = 12
-speedLabel.Font = Enum.Font.Gotham
-speedLabel.Text = "Speed: 1.00"
-speedLabel.TextXAlignment = Enum.TextXAlignment.Left
-speedLabel.LayoutOrder = 3
-speedLabel.Parent = paddingFrame
-
-local speedBox = Instance.new("TextBox")
-speedBox.Name = "SpeedBox"
-speedBox.Size = UDim2.new(1, 0, 0, 32)
-speedBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-speedBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-speedBox.TextSize = 14
-speedBox.Font = Enum.Font.Gotham
-speedBox.Text = "1"
-speedBox.PlaceholderText = "1.0"
-speedBox.BorderSizePixel = 0
-speedBox.LayoutOrder = 4
-speedBox.Parent = paddingFrame
-
-local speedCorner = Instance.new("UICorner")
-speedCorner.CornerRadius = UDim.new(0, 6)
-speedCorner.Parent = speedBox
-
--- Buttons Container
-local buttonsContainer = Instance.new("Frame")
-buttonsContainer.Name = "ButtonsContainer"
-buttonsContainer.Size = UDim2.new(1, 0, 0, 150)
-buttonsContainer.BackgroundTransparency = 1
-buttonsContainer.LayoutOrder = 5
-buttonsContainer.Parent = paddingFrame
-
-local buttonLayout = Instance.new("UIGridLayout")
-buttonLayout.CellSize = UDim2.new(0.5, -4, 0, 30)
-buttonLayout.CellPadding = UDim2.new(0, 8, 0, 8)
-buttonLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-buttonLayout.SortOrder = Enum.SortOrder.LayoutOrder
-buttonLayout.Parent = buttonsContainer
-
--- Helper function to create buttons
-local function createButton(name, text, parent, layoutOrder)
-	local button = Instance.new("TextButton")
-	button.Name = name
-	button.Size = UDim2.new(0, 100, 0, 30)
-	button.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextSize = 12
-	button.Font = Enum.Font.GothamBold
-	button.Text = text
-	button.BorderSizePixel = 0
-	button.LayoutOrder = layoutOrder
-	button.Parent = parent
-	
-	local btnCorner = Instance.new("UICorner")
-	btnCorner.CornerRadius = UDim.new(0, 6)
-	btnCorner.Parent = button
-	
-	return button
+-- Helper: Create label
+local function createLabel(text, layoutOrder)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, 24)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(180, 180, 180)
+    label.TextSize = 13
+    label.Font = Enum.Font.GothamSemibold
+    label.Text = text
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.LayoutOrder = layoutOrder
+    label.Parent = scrollFrame
+    return label
 end
 
--- Create buttons
-local playBtn = createButton("PlayBtn", "Play", buttonsContainer, 1)
-local stopBtn = createButton("StopBtn", "Stop", buttonsContainer, 2)
-local loopBtn = createButton("LoopBtn", "Loop: OFF", buttonsContainer, 3)
-local overrideBtn = createButton("OverrideBtn", "Override: OFF", buttonsContainer, 4)
+-- Helper: Create input box
+local function createInputBox(placeholder, layoutOrder)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, 44)
+    box.BackgroundColor3 = Color3.fromRGB(55, 55, 58)
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.TextSize = 14
+    box.Font = Enum.Font.Gotham
+    box.PlaceholderText = placeholder
+    box.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
+    box.BorderSizePixel = 0
+    box.ClearTextOnFocus = false
+    box.LayoutOrder = layoutOrder
+    box.Parent = scrollFrame
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = box
+    
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 12)
+    padding.PaddingRight = UDim.new(0, 12)
+    padding.Parent = box
+    
+    return box
+end
 
--- Animation state
+-- Helper: Create button (thumb-friendly)
+local function createButton(text, layoutOrder)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, 0, 0, 48)
+    button.BackgroundColor3 = Color3.fromRGB(70, 70, 75)
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextSize = 15
+    button.Font = Enum.Font.GothamBold
+    button.Text = text
+    button.BorderSizePixel = 0
+    button.LayoutOrder = layoutOrder
+    button.Parent = scrollFrame
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = button
+    
+    -- Hover effect
+    local originalColor = button.BackgroundColor3
+    button.MouseEnter:Connect(function()
+        button.BackgroundColor3 = Color3.fromRGB(85, 85, 90)
+    end)
+    button.MouseLeave:Connect(function()
+        button.BackgroundColor3 = originalColor
+    end)
+    
+    return button
+end
+
+-- UI Elements
+createLabel("Animation ID", 1)
+local animationIdBox = createInputBox("rbxassetid://123456789", 2)
+
+createLabel("Playback Speed", 3)
+local speedBox = createInputBox("1.0", 4)
+local speedDisplay = createLabel("Speed: 1.00", 5)
+
+createLabel("Controls", 6)
+local playBtn = createButton("▶ PLAY", 7)
+local stopBtn = createButton("⏹ STOP", 8)
+
+createLabel("Options", 9)
+local loopBtn = createButton("🔁 Loop: OFF", 10)
+local overrideBtn = createButton("🛡️ Override: OFF", 11)
+
+-- State variables
 local currentAnimation = nil
 local isLooping = false
 local isOverride = false
 local animationSpeed = 1
 
--- Helper function to set button color
-local function setButtonColor(button, isActive)
-	button.BackgroundColor3 = isActive and Color3.fromRGB(76, 175, 80) or Color3.fromRGB(70, 70, 70)
+-- Helper: Update button appearance
+local function updateButtonColor(button, isActive)
+    button.BackgroundColor3 = isActive 
+        and Color3.fromRGB(52, 168, 83) 
+        or Color3.fromRGB(70, 70, 75)
 end
 
 -- Play animation
 local function playAnimation()
-	local animId = animationIdBox.Text:match("rbxassetid://(%d+)") or animationIdBox.Text
-	
-	if not animId or animId == "" then
-		print("Invalid animation ID")
-		return
-	end
-	
-	-- Stop current animation if playing
-	if currentAnimation then
-		currentAnimation:Stop()
-	end
-	
-	-- Create new animation
-	local animation = Instance.new("Animation")
-	animation.AnimationId = "rbxassetid://" .. animId
-	
-	-- Load animation on the controller
-	currentAnimation = animationController:LoadAnimation(animation)
-	currentAnimation.Looped = isLooping
-	currentAnimation.Speed = animationSpeed
-	currentAnimation:Play()
+    local animId = animationIdBox.Text
+    
+    -- Extract numeric ID
+    if animId:match("rbxassetid://") then
+        animId = animId:gsub("rbxassetid://", "")
+    end
+    
+    if not animId or animId == "" then
+        print("Invalid animation ID")
+        return
+    end
+    
+    -- Stop existing animation
+    if currentAnimation then
+        currentAnimation:Stop()
+    end
+    
+    -- Create and play new animation
+    local animation = Instance.new("Animation")
+    animation.AnimationId = "rbxassetid://" .. animId
+    
+    currentAnimation = animationController:LoadAnimation(animation)
+    currentAnimation.Looped = isLooping
+    currentAnimation.Speed = animationSpeed
+    currentAnimation:Play()
+    
+    print("Playing animation: " .. animId)
 end
 
 -- Stop animation
 local function stopAnimation()
-	if currentAnimation then
-		currentAnimation:Stop()
-		currentAnimation = nil
-	end
+    if currentAnimation then
+        currentAnimation:Stop()
+        currentAnimation = nil
+        print("Animation stopped")
+    end
 end
 
 -- Toggle loop
 local function toggleLoop()
-	isLooping = not isLooping
-	loopBtn.Text = isLooping and "Loop: ON" or "Loop: OFF"
-	setButtonColor(loopBtn, isLooping)
-	
-	if currentAnimation then
-		currentAnimation.Looped = isLooping
-	end
+    isLooping = not isLooping
+    loopBtn.Text = isLooping and "🔁 Loop: ON" or "🔁 Loop: OFF"
+    updateButtonColor(loopBtn, isLooping)
+    
+    if currentAnimation then
+        currentAnimation.Looped = isLooping
+    end
 end
 
 -- Toggle override
 local function toggleOverride()
-	isOverride = not isOverride
-	overrideBtn.Text = isOverride and "Override: ON" or "Override: OFF"
-	setButtonColor(overrideBtn, isOverride)
+    isOverride = not isOverride
+    overrideBtn.Text = isOverride and "🛡️ Override: ON" or "🛡️ Override: OFF"
+    updateButtonColor(overrideBtn, isOverride)
 end
 
 -- Update speed
 local function updateSpeed()
-	local speedValue = tonumber(speedBox.Text) or 1
-	speedValue = math.max(0.1, math.min(speedValue, 5)) -- Clamp between 0.1 and 5
-	animationSpeed = speedValue
-	speedBox.Text = tostring(speedValue)
-	speedLabel.Text = string.format("Speed: %.2f", speedValue)
-	
-	if currentAnimation then
-		currentAnimation.Speed = animationSpeed
-	end
+    local speedValue = tonumber(speedBox.Text) or 1
+    speedValue = math.max(0.1, math.min(speedValue, 5))
+    
+    animationSpeed = speedValue
+    speedBox.Text = tostring(speedValue)
+    speedDisplay.Text = string.format("Speed: %.2f", speedValue)
+    
+    if currentAnimation then
+        currentAnimation.Speed = animationSpeed
+    end
 end
 
--- Button connections
+-- Connect button events
 playBtn.Activated:Connect(playAnimation)
 stopBtn.Activated:Connect(stopAnimation)
 loopBtn.Activated:Connect(toggleLoop)
 overrideBtn.Activated:Connect(toggleOverride)
 speedBox.FocusLost:Connect(updateSpeed)
-speedBox:GetPropertyChangedSignal("Text"):Connect(updateSpeed)
 
--- Mobile detection
-local function isMobile()
-    local userInputService = game:GetService("UserInputService")
-    return userInputService.TouchEnabled
+-- Update scrolling frame content size
+local function updateScrollSize()
+    listLayout:ApplyLayout()
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 16)
 end
 
--- Only show on touch-enabled devices
-if not isMobile() then
-    screenGui:Destroy()
-    return
-end
-
-
-if not isMobile() then
-	screenGui:Destroy()
-	return
-end
+listLayout.Changed:Connect(updateScrollSize)
+RunService.RenderStepped:Connect(updateScrollSize)
