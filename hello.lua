@@ -254,8 +254,16 @@ speedBox:GetPropertyChangedSignal("Text"):Connect(updateSpeed)
 
 -- Mobile detection
 local function isMobile()
-	return UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+    local userInputService = game:GetService("UserInputService")
+    return userInputService.TouchEnabled
 end
+
+-- Only show on touch-enabled devices
+if not isMobile() then
+    screenGui:Destroy()
+    return
+end
+
 
 if not isMobile() then
 	screenGui:Destroy()
