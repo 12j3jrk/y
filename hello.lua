@@ -1,6 +1,6 @@
 -- StarterPlayerScripts > LocalScript
--- Pelican with a fully procedural cylinder neck
--- No Penguin models are used.
+-- FULL REMAKE
+-- Pelican + procedural connected cylinder trunk/neck
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,62 +11,66 @@ local Birds = ReplicatedStorage:WaitForChild("Birds")
 
 local PelicanTemplate = Birds:WaitForChild("Pelican")
 
---------------------------------------------------
+------------------------------------------------------------
 -- SETTINGS
---------------------------------------------------
+------------------------------------------------------------
 
 local BEAK_NAME = "Beak2"
 
+-- Pelican size
 local PELICAN_SCALE = 20
 
--- Number of cylinders in the neck
-local NECK_COUNT = 45
-
--- Distance from the beak to the end of the neck
+-- Neck
+local NECK_COUNT = 55
 local NECK_LENGTH = 250
 
--- Cylinder dimensions
+-- Cylinder thickness
 local CYLINDER_RADIUS = 5
-local CYLINDER_LENGTH = 7
 
--- How much the neck can bend
-local BEND_AMOUNT = 2.0
+-- Movement
+local MOTION_SPEED = 1.8
 
--- Side-to-side movement
-local SIDE_SWAY = 1.8
+-- How much the neck can bend sideways
+local SIDE_BEND = 35
 
--- Up/down movement
-local VERTICAL_SWAY = 1.4
+-- How much the neck can bend forward/backward
+local FORWARD_BEND = 25
 
--- Speed of the trunk/snake motion
-local MOTION_SPEED = 1.7
+-- How much the tip can swing
+local TIP_SWING = 45
 
--- How quickly cylinders follow their targets
-local FOLLOW_SPEED = 12
+-- How much vertical movement occurs
+local VERTICAL_BEND = 20
 
---------------------------------------------------
--- BLACKEN MODEL
---------------------------------------------------
+-- Smoothness
+local FOLLOW_SPEED = 14
+
+------------------------------------------------------------
+-- BLACK MODEL
+------------------------------------------------------------
 
 local function setBlack(model)
 
 	for _, object in ipairs(model:GetDescendants()) do
 
 		if object:IsA("BasePart") then
+
 			object.Color = Color3.new(0, 0, 0)
 			object.Material = Enum.Material.SmoothPlastic
 
 		elseif object:IsA("Decal") then
+
 			object.Transparency = 1
+
 		end
 
 	end
 
 end
 
---------------------------------------------------
+------------------------------------------------------------
 -- SCALE MODEL
---------------------------------------------------
+------------------------------------------------------------
 
 local function scaleModel(model, scale)
 
@@ -79,12 +83,19 @@ local function scaleModel(model, scale)
 			local relativePosition =
 				pivot:PointToObjectSpace(object.Position)
 
-			object.Size = object.Size * scale
+			local rotation =
+				object.CFrame
+				- object.CFrame.Position
+
+			object.Size =
+				object.Size * scale
 
 			object.CFrame =
 				pivot
-				* CFrame.new(relativePosition * scale)
-				* (object.CFrame - object.CFrame.Position)
+				* CFrame.new(
+					relativePosition * scale
+				)
+				* rotation
 
 		end
 
@@ -92,13 +103,17 @@ local function scaleModel(model, scale)
 
 end
 
---------------------------------------------------
--- GET BEAK
---------------------------------------------------
+------------------------------------------------------------
+-- GET BEAK POSITION
+------------------------------------------------------------
 
 local function getBeakCFrame(model)
 
-	local beak = model:FindFirstChild(BEAK_NAME, true)
+	local beak =
+		model:FindFirstChild(
+			BEAK_NAME,
+			true
+		)
 
 	if beak then
 
@@ -112,36 +127,40 @@ local function getBeakCFrame(model)
 
 	end
 
-	-- Fallback
 	return model:GetPivot()
 
 end
 
---------------------------------------------------
+------------------------------------------------------------
 -- CREATE PELICAN
---------------------------------------------------
+------------------------------------------------------------
 
 local function createPelican()
 
-	local character = player.Character
+	local character =
+		player.Character
 
 	if not character then
 		return nil
 	end
 
-	local humanoidRootPart =
-		character:FindFirstChild("HumanoidRootPart")
+	local root =
+		character:FindFirstChild(
+			"HumanoidRootPart"
+		)
 
-	if not humanoidRootPart then
+	if not root then
 		return nil
 	end
 
-	local pelican = PelicanTemplate:Clone()
+	local pelican =
+		PelicanTemplate:Clone()
 
 	pelican.Name =
 		"ClientPelican_" .. player.Name
 
-	pelican.Parent = workspace
+	pelican.Parent =
+		workspace
 
 	setBlack(pelican)
 
@@ -151,34 +170,37 @@ local function createPelican()
 	)
 
 	pelican:PivotTo(
-		humanoidRootPart.CFrame
+		root.CFrame
 	)
 
 	return pelican
 
 end
 
---------------------------------------------------
+------------------------------------------------------------
 -- CREATE CYLINDER
---------------------------------------------------
+------------------------------------------------------------
 
-local function createCylinder(parent, number)
+local function createCylinder(
+	parent,
+	index
+)
 
-	local cylinder = Instance.new("Part")
+	local cylinder =
+		Instance.new("Part")
 
 	cylinder.Name =
-		"Cylinder_" .. number
+		"Cylinder_" .. index
 
 	cylinder.Shape =
 		Enum.PartType.Cylinder
 
-	-- Roblox cylinders are normally aligned
-	-- along their Y axis.
-	cylinder.Size = Vector3.new(
-		CYLINDER_RADIUS * 2,
-		CYLINDER_LENGTH,
-		CYLINDER_RADIUS * 2
-	)
+	cylinder.Size =
+		Vector3.new(
+			CYLINDER_RADIUS * 2,
+			1,
+			CYLINDER_RADIUS * 2
+		)
 
 	cylinder.Color =
 		Color3.new(0, 0, 0)
@@ -186,97 +208,117 @@ local function createCylinder(parent, number)
 	cylinder.Material =
 		Enum.Material.SmoothPlastic
 
-	cylinder.Anchored = true
+	cylinder.Anchored =
+		true
 
-	cylinder.CanCollide = false
-	cylinder.CanTouch = false
-	cylinder.CanQuery = false
+	cylinder.CanCollide =
+		false
 
-	cylinder.CastShadow = false
+	cylinder.CanTouch =
+		false
 
-	cylinder.Parent = parent
+	cylinder.CanQuery =
+		false
+
+	cylinder.CastShadow =
+		false
+
+	cylinder.Parent =
+		parent
 
 	return cylinder
 
 end
 
---------------------------------------------------
--- BUILD NECK
---------------------------------------------------
+------------------------------------------------------------
+-- CREATE ORIENTATION WHERE Y AXIS = DIRECTION
+------------------------------------------------------------
+
+local function makeCylinderCFrame(
+	position,
+	direction,
+	upReference
+)
+
+	direction =
+		direction.Unit
+
+	-- Pick a reference vector that isn't parallel
+	-- to the cylinder direction.
+	local reference =
+		upReference
+
+	if math.abs(
+		direction:Dot(reference)
+	) > 0.95 then
+
+		reference =
+			Vector3.new(1, 0, 0)
+
+	end
+
+	-- X axis
+	local xAxis =
+		reference:Cross(direction).Unit
+
+	-- Z axis
+	local zAxis =
+		xAxis:Cross(direction).Unit
+
+	-- Cylinder's Y axis points along direction.
+	return CFrame.fromMatrix(
+		position,
+		xAxis,
+		direction,
+		zAxis
+	)
+
+end
+
+------------------------------------------------------------
+-- BUILD THE NECK
+------------------------------------------------------------
 
 local function buildNeck(pelican)
 
-	local neckFolder =
+	local folder =
 		Instance.new("Folder")
 
-	neckFolder.Name =
+	folder.Name =
 		"CylinderNeck"
 
-	neckFolder.Parent =
+	folder.Parent =
 		pelican
 
-	--------------------------------------------------
-	-- CREATE ALL CYLINDERS
-	--------------------------------------------------
+	--------------------------------------------------------
+	-- JOINT COUNT
+	--
+	-- There is one more joint than cylinders.
+	--------------------------------------------------------
+
+	local joints = {}
+
+	local targetJoints = {}
+
+	--------------------------------------------------------
+	-- CYLINDERS
+	--------------------------------------------------------
 
 	local cylinders = {}
 
 	for i = 1, NECK_COUNT do
 
-		local cylinder =
+		cylinders[i] =
 			createCylinder(
-				neckFolder,
+				folder,
 				i
 			)
 
-		table.insert(
-			cylinders,
-			cylinder
-		)
-
 	end
 
-	--------------------------------------------------
-	-- STARTING POSITIONS
-	--------------------------------------------------
-
-	local beakStart =
-		getBeakCFrame(pelican)
-
-	local startPosition =
-		beakStart.Position
-
-	local startDirection =
-		beakStart.UpVector
-
-	-- Put the cylinders initially
-	-- in a straight vertical chain.
-
-	for i, cylinder in ipairs(cylinders) do
-
-		local distance =
-			(i - 1) * CYLINDER_LENGTH
-
-		local position =
-			startPosition
-			+ startDirection * distance
-
-		cylinder.CFrame =
-			CFrame.lookAt(
-				position,
-				position + startDirection
-			)
-			* CFrame.Angles(
-				math.rad(90),
-				0,
-				0
-			)
-
-	end
-
-	--------------------------------------------------
+	--------------------------------------------------------
 	-- ANIMATION
-	--------------------------------------------------
+	--------------------------------------------------------
 
 	task.spawn(function()
 
@@ -291,191 +333,201 @@ local function buildNeck(pelican)
 			local time =
 				os.clock() - startTime
 
-			--------------------------------------------------
-			-- CURRENT BEAK
-			--------------------------------------------------
+			------------------------------------------------
+			-- BEAK
+			------------------------------------------------
 
 			local beak =
-				getBeakCFrame(pelican)
+				getBeakCFrame(
+					pelican
+				)
 
 			local origin =
 				beak.Position
 
-			-- The neck initially points upward.
-			local baseDirection =
+			------------------------------------------------
+			-- IMPORTANT:
+			--
+			-- These are the actual coordinate axes
+			-- used to grow the chain.
+			------------------------------------------------
+
+			local up =
 				beak.UpVector
 
-			local baseRight =
+			local right =
 				beak.RightVector
 
-			local baseLook =
+			local forward =
 				beak.LookVector
 
-			--------------------------------------------------
-			-- BUILD A CURVED "SPINE"
-			--------------------------------------------------
+			------------------------------------------------
+			-- DISTANCE BETWEEN JOINTS
+			------------------------------------------------
 
-			local positions = {}
+			local segmentLength =
+				NECK_LENGTH
+				/ NECK_COUNT
 
-			local directions = {}
+			------------------------------------------------
+			-- FIRST JOINT IS LITERALLY THE BEAK
+			------------------------------------------------
 
-			local previousPosition =
+			targetJoints[1] =
+				origin
+
+			------------------------------------------------
+			-- BUILD THE CHAIN
+			--
+			-- THIS IS THE IMPORTANT PART.
+			--
+			-- Joint 2 comes from Joint 1.
+			-- Joint 3 comes from Joint 2.
+			-- Joint 4 comes from Joint 3.
+			--
+			-- Therefore the neck is actually connected.
+			------------------------------------------------
+
+			local previous =
 				origin
 
 			local previousDirection =
-				baseDirection
+				up
 
-			for i = 1, NECK_COUNT do
+			for i = 2, NECK_COUNT + 1 do
 
 				local alpha =
-					(i - 1)
-					/ math.max(
-						1,
-						NECK_COUNT - 1
-					)
+					(i - 2)
+					/ NECK_COUNT
 
-				--------------------------------------------------
-				-- TRUNK/SNAKE WAVE
-				--------------------------------------------------
+				------------------------------------------------
+				-- WAVE PHASE
+				--
+				-- The wave gets stronger toward the tip.
+				------------------------------------------------
 
-				local wave1 =
+				local phase =
+					time
+					* MOTION_SPEED
+					+ alpha * 6
+
+				local waveSide =
+					math.sin(phase)
+
+				local waveForward =
 					math.sin(
-						time * MOTION_SPEED
-						+ alpha * 5
+						phase * 0.73
+						+ 1.7
 					)
 
-				local wave2 =
-					math.sin(
-						time * MOTION_SPEED * 0.63
-						+ alpha * 8
-					)
-
-				local wave3 =
+				local waveVertical =
 					math.cos(
-						time * MOTION_SPEED * 0.47
-						+ alpha * 11
+						phase * 0.61
+						+ 2.4
 					)
 
-				--------------------------------------------------
-				-- MAKE BENDING STRONGER TOWARD THE TIP
-				--------------------------------------------------
+				------------------------------------------------
+				-- BEND STRENGTH
+				------------------------------------------------
 
-				local bendStrength =
-					alpha ^ 1.25
+				local strength =
+					alpha ^ 1.35
 
-				local sideOffset =
-					wave1
-					* SIDE_SWAY
-					* bendStrength
+				------------------------------------------------
+				-- DESIRED DIRECTION
+				------------------------------------------------
 
-				local verticalOffset =
-					wave2
-					* VERTICAL_SWAY
-					* bendStrength
+				local desiredDirection =
+					up
 
-				local forwardOffset =
-					wave3
-					* BEND_AMOUNT
-					* bendStrength
+				desiredDirection +=
+					right
+					* (
+						waveSide
+						* SIDE_BEND
+						* strength
+					)
 
-				--------------------------------------------------
-				-- TARGET POSITION
-				--------------------------------------------------
+				desiredDirection +=
+					forward
+					* (
+						waveForward
+						* FORWARD_BEND
+						* strength
+					)
 
-				local targetPosition =
-					origin
-					+ baseDirection
-						* (
-							(i - 1)
-							* CYLINDER_LENGTH
+				desiredDirection +=
+					up
+					* (
+						waveVertical
+						* VERTICAL_BEND
+						* strength
+					)
+
+				------------------------------------------------
+				-- TIP SWING
+				------------------------------------------------
+
+				local tipStrength =
+					strength ^ 2
+
+				desiredDirection +=
+					right
+					* (
+						math.sin(
+							time * MOTION_SPEED * 1.4
+							+ alpha * 10
 						)
+						* TIP_SWING
+						* tipStrength
+					)
 
-					+ baseRight
-						* sideOffset
+				------------------------------------------------
+				-- NORMALIZE
+				------------------------------------------------
 
-					+ baseLook
-						* forwardOffset
+				desiredDirection =
+					desiredDirection.Unit
 
-					+ baseDirection
-						* verticalOffset
+				------------------------------------------------
+				-- SMOOTH DIRECTION
+				--
+				-- This prevents sharp 90-degree joints.
+				------------------------------------------------
 
-				--------------------------------------------------
-				-- CONNECT TO PREVIOUS SEGMENT
-				--------------------------------------------------
+				local direction =
+					previousDirection:Lerp(
+						desiredDirection,
+						0.22
+					).Unit
 
-				if i > 1 then
+				------------------------------------------------
+				-- THE NEW JOINT IS EXACTLY ONE
+				-- SEGMENT LENGTH FROM THE PREVIOUS JOINT.
+				--
+				-- NO INDEPENDENT OFFSET.
+				-- NO RANDOM GAP.
+				------------------------------------------------
 
-					local previous =
-						positions[i - 1]
+				local newPosition =
+					previous
+					+ direction
+					* segmentLength
 
-					-- Prevent sudden disconnected jumps.
-					local connection =
-						targetPosition
-						- previous
+				targetJoints[i] =
+					newPosition
 
-					local distance =
-						connection.Magnitude
+				previous =
+					newPosition
 
-					if distance > 0 then
-
-						targetPosition =
-							previous
-							+ connection.Unit
-								* CYLINDER_LENGTH
-
-					end
-
-				end
-
-				positions[i] =
-					targetPosition
-
-			end
-
-			--------------------------------------------------
-			-- CALCULATE DIRECTIONS
-			--------------------------------------------------
-
-			for i = 1, NECK_COUNT do
-
-				local direction
-
-				if i < NECK_COUNT then
-
-					direction =
-						positions[i + 1]
-						- positions[i]
-
-				elseif i > 1 then
-
-					direction =
-						positions[i]
-						- positions[i - 1]
-
-				else
-
-					direction =
-						baseDirection
-
-				end
-
-				if direction.Magnitude > 0.001 then
-
-					directions[i] =
-						direction.Unit
-
-				else
-
-					directions[i] =
-						baseDirection
-
-				end
+				previousDirection =
+					direction
 
 			end
 
-			--------------------------------------------------
-			-- MOVE CYLINDERS
-			--------------------------------------------------
+			------------------------------------------------
+			-- SMOOTH THE ACTUAL JOINTS
+			------------------------------------------------
 
 			local smoothing =
 				1 - math.exp(
@@ -483,39 +535,91 @@ local function buildNeck(pelican)
 					* deltaTime
 				)
 
-			for i, cylinder in ipairs(cylinders) do
+			for i = 1, NECK_COUNT + 1 do
 
-				if not cylinder.Parent then
-					break
+				if not joints[i] then
+
+					joints[i] =
+						targetJoints[i]
+
+				else
+
+					joints[i] =
+						joints[i]:Lerp(
+							targetJoints[i],
+							smoothing
+						)
+
 				end
 
-				local position =
-					positions[i]
+			end
 
-				local direction =
-					directions[i]
+			------------------------------------------------
+			-- PUT CYLINDERS BETWEEN JOINTS
+			------------------------------------------------
 
-				--------------------------------------------------
-				-- MAKE CYLINDER FOLLOW THE NECK
-				--------------------------------------------------
+			for i = 1, NECK_COUNT do
 
-				local targetCFrame =
-					CFrame.lookAt(
-						position,
-						position + direction,
-						baseRight
-					)
-					* CFrame.Angles(
-						math.rad(90),
-						0,
-						0
-					)
+				local a =
+					joints[i]
 
-				cylinder.CFrame =
-					cylinder.CFrame:Lerp(
-						targetCFrame,
-						smoothing
-					)
+				local b =
+					joints[i + 1]
+
+				local difference =
+					b - a
+
+				local length =
+					difference.Magnitude
+
+				if length > 0.01 then
+
+					local direction =
+						difference.Unit
+
+					------------------------------------------------
+					-- CENTER THE CYLINDER BETWEEN THE TWO JOINTS
+					------------------------------------------------
+
+					local center =
+						(a + b) * 0.5
+
+					------------------------------------------------
+					-- Y AXIS OF CYLINDER = NECK DIRECTION
+					------------------------------------------------
+
+					local target =
+						makeCylinderCFrame(
+							center,
+							direction,
+							up
+						)
+
+					------------------------------------------------
+					-- THE CYLINDER LENGTH IS EXACTLY THE
+					-- DISTANCE BETWEEN THE TWO JOINTS.
+					------------------------------------------------
+
+					local targetSize =
+						Vector3.new(
+							CYLINDER_RADIUS * 2,
+							length + 0.15,
+							CYLINDER_RADIUS * 2
+						)
+
+					cylinders[i].Size =
+						cylinders[i].Size:Lerp(
+							targetSize,
+							smoothing
+						)
+
+					cylinders[i].CFrame =
+						cylinders[i].CFrame:Lerp(
+							target,
+							smoothing
+						)
+
+				end
 
 			end
 
@@ -525,4 +629,67 @@ local function buildNeck(pelican)
 
 end
 
-------------------------------------------------
+------------------------------------------------------------
+-- REMOVE OLD VERSION
+------------------------------------------------------------
+
+local function clearOld()
+
+	local name =
+		"ClientPelican_" .. player.Name
+
+	for _, object in ipairs(
+		workspace:GetChildren()
+	) do
+
+		if object:IsA("Model")
+			and object.Name == name then
+
+			object:Destroy()
+
+		end
+
+	end
+
+end
+
+------------------------------------------------------------
+-- START
+------------------------------------------------------------
+
+local function start()
+
+	clearOld()
+
+	local pelican =
+		createPelican()
+
+	if not pelican then
+		return
+	end
+
+	buildNeck(
+		pelican
+	)
+
+end
+
+------------------------------------------------------------
+-- CHARACTER
+------------------------------------------------------------
+
+if player.Character then
+
+	task.wait(0.2)
+
+	start()
+
+end
+
+player.CharacterAdded:Connect(function()
+
+	task.wait(0.3)
+
+	start()
+
+end)
