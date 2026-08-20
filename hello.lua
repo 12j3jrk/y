@@ -2,7 +2,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local Birds = ReplicatedStorage:WaitForChild("Birds")
@@ -10,299 +9,204 @@ local Birds = ReplicatedStorage:WaitForChild("Birds")
 local PelicanTemplate = Birds:WaitForChild("Pelican")
 local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
---------------------------------------------------
--- SETTINGS
---------------------------------------------------
-
+-- Try to match the beak part/attachment name inside the Pelican model
 local BEAK_NAME = "Beak2"
+local FALLBACK_TO_MODEL_PIVOT = true
 
+-- Tuning
 local PELICAN_SCALE = 20
 local PENGUIN_SCALE = 10
-
 local NECK_COUNT = 53
-local NECK_LENGTH = 250
 
--- More separation between penguins
-local PENGUIN_SPACING = 1.18
+local NECK_LENGTH = 250 -- used as overall length target
+local UPDATE_DT = 0.02
 
--- Overall movement speed
--- Smaller = slower
-local WALK_SPEED = 0.12
-
--- How far the entire creature slowly moves
-local WALK_DISTANCE = 2.5
-
--- Slow body bob
-local BODY_BOB = 0.7
-
--- Neck joint movement
-local NECK_SWAY = 0.9
-local NECK_BEND = 0.16
-
--- How quickly penguins follow their targets
-local NECK_SMOOTHING = 0.055
-
-local UPDATE_DT = 0.03
-
---------------------------------------------------
--- BLACK
---------------------------------------------------
+-- "insane" motion tuning
+local INSANE_BASE_SPEED = 4.0     -- higher = faster changes
+local JITTER_STRENGTH = 3.5       -- positional randomness
+local ROT_INSANE_STRENGTH = 3.5    -- rotational randomness
+local SWAY_STRENGTH = 1.18
 
 local function setBlack(model)
-
 	for _, inst in ipairs(model:GetDescendants()) do
-
 		if inst:IsA("BasePart") then
 			inst.Color = Color3.new(0, 0, 0)
-
 			if inst.Material ~= Enum.Material.Neon then
 				inst.Material = Enum.Material.SmoothPlastic
 			end
-
 		elseif inst:IsA("Decal") then
 			inst.Transparency = 1
 		end
 	end
 end
 
---------------------------------------------------
--- BEAK
---------------------------------------------------
-
 local function getBeakCFrame(model)
-
-	local found =
-		model:FindFirstChild(
-			BEAK_NAME,
-			true
-		)
-
+	local found = model:FindFirstChild(BEAK_NAME, true)
 	if found then
-
 		if found:IsA("Attachment") then
 			return found.WorldCFrame
-
 		elseif found:IsA("BasePart") then
 			return found.CFrame
 		end
 	end
-
+	if FALLBACK_TO_MODEL_PIVOT then
+		return model:GetPivot()
+	end
 	return model:GetPivot()
 end
 
---------------------------------------------------
--- SCALE
---------------------------------------------------
-
 local function scaleModel(model, scale)
-
-	local pivot =
-		model:GetPivot()
-
+	local pivot = model:GetPivot()
 	for _, inst in ipairs(model:GetDescendants()) do
-
 		if inst:IsA("BasePart") then
-
-			local relative =
-				pivot:PointToObjectSpace(
-					inst.Position
-				)
-
-			inst.Size =
-				inst.Size * scale
-
-			inst.CFrame =
-				pivot
-				* CFrame.new(
-					relative * scale
-				)
-				* (
-					inst.CFrame
-					- inst.CFrame.Position
-				)
+			local relPos = pivot:PointToObjectSpace(inst.Position)
+			inst.Size = inst.Size * scale
+			-- Reposition translation; keep orientation
+			inst.CFrame = pivot * CFrame.new(relPos * scale) * (inst.CFrame - inst.CFrame.Position)
 		end
 	end
 end
 
---------------------------------------------------
--- PENGUIN SIZE
---------------------------------------------------
-
-local function getPenguinStep(model)
-
-	local _, size =
-		model:GetBoundingBox()
-
-	return math.max(
-		1,
-		(size.Y + size.Z) * 0.5
-	)
+local function estimatePenguinSegmentStep(penguinTemplateClone)
+	-- Use bounding box depth along forward-ish axis approximation.
+	-- We'll just use its overall bounding box size magnitude to get a step.
+	local cf, size = penguinTemplateClone:GetBoundingBox()
+	-- A single scalar step that tends to prevent gaps.
+	-- Since we don't know exact neck direction, we use size.Z as a heuristic.
+	local step = math.max(1, (size.Y + size.Z) * 0.5)
+	return step
 end
 
---------------------------------------------------
--- CREATE PELICAN
---------------------------------------------------
+local function clonePelican()
+	local char = player.Character
+	if not char then return nil end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return nil end
 
-local function createPelican()
-
-	local character =
-		player.Character
-
-	if not character then
-		return nil
-	end
-
-	local hrp =
-		character:FindFirstChild(
-			"HumanoidRootPart"
-		)
-
-	if not hrp then
-		return nil
-	end
-
-	local pelican =
-		PelicanTemplate:Clone()
-
-	pelican.Name =
-		"ClientPelican_" ..
-		player.Name
-
-	pelican.Parent =
-		workspace
+	local pelican = PelicanTemplate:Clone()
+	pelican.Name = "ClientPelican_" .. player.Name
+	pelican.Parent = workspace
 
 	setBlack(pelican)
+	scaleModel(pelican, PELICAN_SCALE)
 
-	scaleModel(
-		pelican,
-		PELICAN_SCALE
-	)
-
-	-- Initial position only.
-	-- From this point onward the pelican will
-	-- translate without changing its rotation.
-	pelican:PivotTo(
-		hrp.CFrame
-	)
+	-- Teleport immediately to player
+	pelican:PivotTo(hrp.CFrame)
 
 	return pelican
 end
 
---------------------------------------------------
--- BUILD NECK
---------------------------------------------------
-
 local function buildNeck(pelican)
+	local container = Instance.new("Folder")
+	container.Name = "ClientPenguinNeckStack"
+	container.Parent = pelican
 
-	local container =
-		Instance.new("Folder")
+	local beakCF = getBeakCFrame(pelican)
+	local forward = beakCF.LookVector
 
-	container.Name =
-		"ClientPenguinNeckStack"
-
-	container.Parent =
-		pelican
-
-	--------------------------------------------------
-	-- INITIAL BEAK
-	--------------------------------------------------
-
-	local initialBeak =
-		getBeakCFrame(pelican)
-
-	local forward =
-		initialBeak.LookVector
-
-	--------------------------------------------------
-	-- FIND PENGUIN SIZE
-	--------------------------------------------------
-
-	local temp =
-		PenguinTemplate:Clone()
-
+	-- Clone a temp penguin to estimate step so the stack doesn't leave gaps
+	local temp = PenguinTemplate:Clone()
 	setBlack(temp)
-
-	scaleModel(
-		temp,
-		PENGUIN_SCALE
-	)
-
-	local baseStep =
-		getPenguinStep(temp)
-
+	scaleModel(temp, PENGUIN_SCALE)
+	local segStep = estimatePenguinSegmentStep(temp)
 	temp:Destroy()
 
-	--------------------------------------------------
-	-- NECK LENGTH
-	--------------------------------------------------
+	-- Decide overall length step distribution:
+	-- If NECK_LENGTH is shorter/longer than segStep*(count-1), we adjust.
+	local desiredTotal = NECK_LENGTH
+	local currentTotal = segStep * (NECK_COUNT - 1)
+	local lengthScale = (currentTotal > 0) and (desiredTotal / currentTotal) or 1
+	local step = segStep * lengthScale
 
-	local currentLength =
-		baseStep *
-		(NECK_COUNT - 1)
-
-	local lengthScale =
-		currentLength > 0
-		and (
-			NECK_LENGTH /
-			currentLength
-		)
-		or 1
-
-	local step =
-		baseStep
-		* lengthScale
-		* PENGUIN_SPACING
-
-	--------------------------------------------------
-	-- CREATE PENGUINS
-	--------------------------------------------------
-
+	-- Create penguins
 	local penguins = {}
 
 	for i = 1, NECK_COUNT do
+		local p = PenguinTemplate:Clone()
+		p.Name = ("Penguin_%02d"):format(i)
+		p.Parent = container
 
-		local penguin =
-			PenguinTemplate:Clone()
+		setBlack(p)
+		scaleModel(p, PENGUIN_SCALE)
 
-		penguin.Name =
-			("Penguin_%02d"):format(i)
+		local dist = step * (i - 1)
+		local targetCF = beakCF * CFrame.new(-forward * dist)
+		p:PivotTo(targetCF)
 
-		penguin.Parent =
-			container
-
-		setBlack(penguin)
-
-		scaleModel(
-			penguin,
-			PENGUIN_SCALE
-		)
-
-		local distance =
-			step * (i - 1)
-
-		--------------------------------------------------
-		-- IMPORTANT:
-		-- Initial orientation follows the neck,
-		-- but each penguin remains its own object.
-		--------------------------------------------------
-
-		local target =
-			initialBeak
-			* CFrame.new(
-				-forward * distance
-			)
-
-		penguin:PivotTo(target)
-
-		table.insert(
-			penguins,
-			penguin
-		)
+		table.insert(penguins, p)
 	end
 
-	--------------------------------------------------
-	-- SAVE ORIGINAL PELICAN TRANSFORM
-	--------------------------------------------------
+	-- Insane connected animation
+	task.spawn(function()
+		local t0 = os.clock()
+		while pelican.Parent do
+			local t = os.clock() - t0
+			local currentBeak = getBeakCFrame(pelican)
+			local fwd = currentBeak.LookVector
+			local right = currentBeak.RightVector
+			local up = currentBeak.UpVector
 
-	local originalPelican =
-	
+			-- fast jitter seed-ish changes
+			local baseYaw = math.sin(t * INSANE_BASE_SPEED * 1.1) * (0.6 + math.random() * 0.6)
+			local basePitch = math.cos(t * INSANE_BASE_SPEED * 0.9) * (0.4 + math.random() * 0.6)
+
+			-- For each segment, keep it anchored and still connected (no gaps)
+			for i, p in ipairs(penguins) do
+				if not p.Parent then break end
+
+				local alpha = (i - 1) / math.max(1, NECK_COUNT - 1)
+				local dist = step * (i - 1)
+
+				-- random shake (stronger for far segments)
+				local randX = (math.random() - 0.5) * 2
+				local randY = (math.random() - 0.5) * 2
+				local randZ = (math.random() - 0.5) * 2
+
+				local jitterPos = (right * randX + up * randY) * (JITTER_STRENGTH * (0.1 + alpha))
+				local jitterRotYaw = (math.sin(t * INSANE_BASE_SPEED + i * 0.25) + randZ) * (ROT_INSANE_STRENGTH * 0.02 * (0.2 + alpha))
+				local jitterRotRoll = (math.cos(t * INSANE_BASE_SPEED * 1.2 + i * 0.18) + randY) * (ROT_INSANE_STRENGTH * 0.02 * (0.2 + alpha))
+
+				-- curved/twisting neck
+				local sway = math.sin(t * (INSANE_BASE_SPEED * 0.8) + i * 0.35) * SWAY_STRENGTH * (0.05 + alpha)
+				local pitch = (basePitch * (0.2 + alpha)) + sway * 0.2
+				local yaw = (baseYaw * (0.2 + alpha)) + jitterRotYaw
+
+				-- keep spacing exact -> no gaps by using step-driven placement only
+				local target = currentBeak
+					* CFrame.Angles(pitch, yaw, jitterRotRoll)
+					* CFrame.new(-fwd * dist)
+					* CFrame.new(jitterPos)
+
+				-- fast smoothing so it looks chaotic but attached
+				local current = p:GetPivot()
+				p:PivotTo(current:Lerp(target, 0.18))
+			end
+
+			task.wait(UPDATE_DT)
+		end
+	end)
+end
+
+local function clearOld()
+	for _, inst in ipairs(workspace:GetChildren()) do
+		if inst:IsA("Model") and inst.Name == ("ClientPelican_" .. player.Name) then
+			inst:Destroy()
+		end
+	end
+end
+
+local function start()
+	clearOld()
+	local pelican = clonePelican()
+	if not pelican then return end
+	buildNeck(pelican)
+end
+
+if player.Character then
+	start()
+end
+
+player.CharacterAdded:Connect(function()
+	task.wait(0.2)
+	start()
+end)
