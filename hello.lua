@@ -16,7 +16,7 @@ local FALLBACK_TO_MODEL_PIVOT = true
 -- Tuning
 local PELICAN_SCALE = 20
 local PENGUIN_SCALE = 10
-local NECK_COUNT = 53
+local NECK_COUNT = 210
 
 local NECK_LENGTH = 250 -- used as overall length target
 local UPDATE_DT = 0.02
