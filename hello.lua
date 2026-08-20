@@ -2,38 +2,314 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local Birds = ReplicatedStorage:WaitForChild("Birds")
 
 local PelicanTemplate = Birds:WaitForChild("Pelican")
-local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
--- Try to match the beak part/attachment name inside the Pelican model
+--// Main settings
+local PELICAN_SCALE = 20
+
+-- Cylinder settings
+local CYLINDER_RADIUS = 5
+local CYLINDER_HEIGHT = 10
+local CYLINDER_GAP = 0
+local CYLINDER_ADD_DELAY = 0.08
+
+-- Set this to nil for a truly unlimited number of cylinders.
+-- Keeping a limit prevents the client from eventually creating too many Parts.
+local MAX_CYLINDERS = 350
+
+--// Fade settings
+local FADE_START_DELAY = 1.5
+local FADE_TIME = 2.5
+
+--// Extremely slow movement
+local SNAIL_MOVE_SPEED = 0.006
+local SNAIL_SWAY_AMOUNT = 0.08
+local SNAIL_ROTATION_AMOUNT = 0.002
+
 local BEAK_NAME = "Beak2"
 local FALLBACK_TO_MODEL_PIVOT = true
-
--- Tuning
-local PELICAN_SCALE = 20
-local PENGUIN_SCALE = 10
-local NECK_COUNT = 210
-
-local NECK_LENGTH = 250 -- used as overall length target
-local UPDATE_DT = 0.02
-
--- "insane" motion tuning
-local INSANE_BASE_SPEED = 4.0     -- higher = faster changes
-local JITTER_STRENGTH = 3.5       -- positional randomness
-local ROT_INSANE_STRENGTH = 3.5    -- rotational randomness
-local SWAY_STRENGTH = 1.18
 
 local function setBlack(model)
 	for _, inst in ipairs(model:GetDescendants()) do
 		if inst:IsA("BasePart") then
 			inst.Color = Color3.new(0, 0, 0)
-			if inst.Material ~= Enum.Material.Neon then
-				inst.Material = Enum.Material.SmoothPlastic
+			inst.Material = Enum.Material.SmoothPlastic
+		elseif inst:IsA("Decal") then
+			inst.Transparency = 1
+		end
+	end
+end
+
+local function getBeakCFrame(model)
+	local found = model:FindFirstChild(BEAK_NAME, true)
+
+	if found then
+		if found:IsA("Attachment") then
+			return found.WorldCFrame
+		elseif found:IsA("BasePart") then
+			return found.CFrame
+		end
+	end
+
+	if FALLBACK_TO_MODEL_PIVOT then
+		return model:GetPivot()
+	end
+
+	return model:GetPivot()
+end
+
+local function scaleModel(model, scale)
+	local pivot = model:GetPivot()
+
+	for _, inst in ipairs(model:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			local relativePosition = pivot:PointToObjectSpace(inst.Position)
+			local relativeRotation = inst.CFrame - inst.CFrame.Position
+
+			inst.Size *= scale
+			inst.CFrame =
+				pivot
+				* CFrame.new(relativePosition * scale)
+				* relativeRotation
+		end
+	end
+end
+
+local function createCylinder()
+	local cylinder = Instance.new("Part")
+
+	cylinder.Name = "BlackCylinder"
+	cylinder.Shape = Enum.PartType.Cylinder
+
+	-- Roblox cylinders use their X axis as their length axis.
+	cylinder.Size = Vector3.new(
+		CYLINDER_HEIGHT,
+		CYLINDER_RADIUS * 2,
+		CYLINDER_RADIUS * 2
+	)
+
+	cylinder.Color = Color3.new(0, 0, 0)
+	cylinder.Material = Enum.Material.SmoothPlastic
+	cylinder.Transparency = 0
+
+	cylinder.Anchored = true
+	cylinder.CanCollide = false
+	cylinder.CanTouch = false
+	cylinder.CanQuery = false
+
+	return cylinder
+end
+
+local function fadeAndDestroyCylinder(cylinder)
+	task.delay(FADE_START_DELAY, function()
+		if not cylinder or not cylinder.Parent then
+			return
+		end
+
+		local tween = TweenService:Create(
+			cylinder,
+			TweenInfo.new(
+				FADE_TIME,
+				Enum.EasingStyle.Sine,
+				Enum.EasingDirection.InOut
+			),
+			{
+				Transparency = 1
+			}
+		)
+
+		tween:Play()
+		tween.Completed:Wait()
+
+		if cylinder and cylinder.Parent then
+			cylinder:Destroy()
+		end
+	end)
+end
+
+local function clonePelican()
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return nil
+	end
+
+	local pelican = PelicanTemplate:Clone()
+	pelican.Name = "ClientPelican_" .. player.Name
+	pelican.Parent = workspace
+
+	setBlack(pelican)
+	scaleModel(pelican, PELICAN_SCALE)
+	pelican:PivotTo(hrp.CFrame)
+
+	return pelican
+end
+
+local function buildInfiniteCylinderNeck(pelican)
+	local neckFolder = Instance.new("Folder")
+	neckFolder.Name = "InfiniteBlackCylinderNeck"
+	neckFolder.Parent = pelican
+
+	local cylinders = {}
+	local totalDistance = 0
+	local running = true
+
+	-- Adds one cylinder at a time forever.
+	task.spawn(function()
+		while running and pelican.Parent do
+			local cylinder = createCylinder()
+			cylinder.Parent = neckFolder
+
+			table.insert(cylinders, cylinder)
+
+			totalDistance += CYLINDER_HEIGHT + CYLINDER_GAP
+
+			fadeAndDestroyCylinder(cylinder)
+
+			-- Remove the oldest reference after it has faded.
+			if MAX_CYLINDERS and #cylinders > MAX_CYLINDERS then
+				local oldest = table.remove(cylinders, 1)
+
+				if oldest and oldest.Parent then
+					oldest:Destroy()
+				end
 			end
+
+			task.wait(CYLINDER_ADD_DELAY)
+		end
+	end)
+
+	-- Slowly animate the pelican and every cylinder together.
+	task.spawn(function()
+		local startTime = os.clock()
+
+		while running and pelican.Parent do
+			local elapsed = os.clock() - startTime
+			local beakCFrame = getBeakCFrame(pelican)
+
+			local forward = beakCFrame.LookVector
+			local right = beakCFrame.RightVector
+			local up = beakCFrame.UpVector
+
+			-- Almost unnoticeably slow motion.
+			local sway =
+				math.sin(elapsed * SNAIL_MOVE_SPEED)
+				* SNAIL_SWAY_AMOUNT
+
+			local verticalSway =
+				math.cos(elapsed * SNAIL_MOVE_SPEED * 0.7)
+				* SNAIL_SWAY_AMOUNT
+
+			local tinyRotation =
+				math.sin(elapsed * SNAIL_MOVE_SPEED)
+				* SNAIL_ROTATION_AMOUNT
+
+			-- Move the entire pelican very slowly.
+			local pelicanPivot = pelican:GetPivot()
+
+			pelican:PivotTo(
+				pelicanPivot
+				* CFrame.new(
+					right * (sway * 0.01)
+					+ up * (verticalSway * 0.01)
+				)
+				* CFrame.Angles(0, tinyRotation, 0)
+			)
+
+			-- Re-read the beak after moving the pelican so the neck follows it.
+			beakCFrame = getBeakCFrame(pelican)
+			forward = beakCFrame.LookVector
+			right = beakCFrame.RightVector
+			up = beakCFrame.UpVector
+
+			local distanceFromBeak = 0
+
+			for index, cylinder in ipairs(cylinders) do
+				if cylinder and cylinder.Parent then
+					-- The cylinders are placed directly behind one another.
+					-- No random offsets means they do not swarm toward one point.
+					local cylinderPosition =
+						beakCFrame.Position
+						- forward * (distanceFromBeak + CYLINDER_HEIGHT / 2)
+
+					local targetCFrame =
+						CFrame.lookAt(
+							cylinderPosition,
+							cylinderPosition - forward,
+							up
+						)
+						* CFrame.Angles(0, math.rad(90), 0)
+
+					-- Slightly bend the entire neck, but extremely slowly.
+					local bend =
+						math.sin(
+							elapsed * SNAIL_MOVE_SPEED
+							+ index * 0.025
+						)
+						* 0.001
+
+					targetCFrame *= CFrame.Angles(0, bend, 0)
+
+					-- Soft movement so every cylinder follows the pelican.
+					cylinder.CFrame = cylinder.CFrame:Lerp(
+						targetCFrame,
+						0.035
+					)
+
+					distanceFromBeak += CYLINDER_HEIGHT + CYLINDER_GAP
+				end
+			end
+
+			RunService.RenderStepped:Wait()
+		end
+	end)
+
+	pelican.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			running = false
+		end
+	end)
+end
+
+local function clearOldPelican()
+	local oldName = "ClientPelican_" .. player.Name
+
+	for _, inst in ipairs(workspace:GetChildren()) do
+		if inst:IsA("Model") and inst.Name == oldName then
+			inst:Destroy()
+		end
+	end
+end
+
+local function start()
+	clearOldPelican()
+
+	local pelican = clonePelican()
+	if not pelican then
+		return
+	end
+
+	buildInfiniteCylinderNeck(pelican)
+end
+
+if player.Character then
+	start()
+end
+
+player.CharacterAdded:Connect(function()
+	task.wait(0.2)
+	start()
+end)
 		elseif inst:IsA("Decal") then
 			inst.Transparency = 1
 		end
