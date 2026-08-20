@@ -1,388 +1,212 @@
 -- StarterPlayerScripts > LocalScript
--- GIANT PELICAN / ELEPHANT TRUNK
--- VERTICAL CYLINDER VERSION
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local Birds = ReplicatedStorage:WaitForChild("Birds")
+
 local PelicanTemplate = Birds:WaitForChild("Pelican")
+local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
-------------------------------------------------------------
--- SETTINGS
-------------------------------------------------------------
-
+-- Try to match the beak part/attachment name inside the Pelican model
 local BEAK_NAME = "Beak2"
+local FALLBACK_TO_MODEL_PIVOT = true
 
--- Giant pelican
+-- Tuning
 local PELICAN_SCALE = 20
+local PENGUIN_SCALE = 10
+local NECK_COUNT = 53
 
-------------------------------------------------------------
--- NECK
-------------------------------------------------------------
+local NECK_LENGTH = 250 -- used as overall length target
+local UPDATE_DT = 0.02
 
--- Total height of the neck
-local NECK_LENGTH = 300
+-- "insane" motion tuning
+local INSANE_BASE_SPEED = 4.0     -- higher = faster changes
+local JITTER_STRENGTH = 3.5       -- positional randomness
+local ROT_INSANE_STRENGTH = 3.5    -- rotational randomness
+local SWAY_STRENGTH = 1.18
 
--- Number of vertical cylinders
-local NECK_COUNT = 30
-
--- Thickness of every cylinder
-local CYLINDER_DIAMETER = 12
-
--- Slight overlap so there are NO visible gaps
-local CYLINDER_OVERLAP = 0.8
-
-------------------------------------------------------------
--- TRUNK MOVEMENT
-------------------------------------------------------------
-
-local SWAY_SPEED = 0.45
-
--- Side-to-side movement of the trunk
-local SIDE_SWAY = 30
-
--- Forward/backward movement
-local FORWARD_SWAY = 18
-
--- Up/down wave
-local VERTICAL_SWAY = 8
-
-------------------------------------------------------------
--- GIANT MOVEMENT
-------------------------------------------------------------
-
--- Very slow movement, like an enormous animal
-local GIANT_SPEED = 1.2
-
--- Gentle body turning
-local TURN_SPEED = 0.08
-
-------------------------------------------------------------
--- SMOOTHNESS
-------------------------------------------------------------
-
-local FOLLOW_SPEED = 3
-
-------------------------------------------------------------
--- BLACKEN PELICAN
-------------------------------------------------------------
-
-local function blacken(model)
-
-	for _, object in ipairs(model:GetDescendants()) do
-
-		if object:IsA("BasePart") then
-
-			object.Color = Color3.new(0, 0, 0)
-			object.Material = Enum.Material.SmoothPlastic
-
-		elseif object:IsA("Decal") then
-
-			object.Transparency = 1
-
+local function setBlack(model)
+	for _, inst in ipairs(model:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			inst.Color = Color3.new(0, 0, 0)
+			if inst.Material ~= Enum.Material.Neon then
+				inst.Material = Enum.Material.SmoothPlastic
+			end
+		elseif inst:IsA("Decal") then
+			inst.Transparency = 1
 		end
-
 	end
-
 end
-
-------------------------------------------------------------
--- SCALE PELICAN
-------------------------------------------------------------
-
-local function scaleModel(model, scale)
-
-	local pivot = model:GetPivot()
-
-	for _, object in ipairs(model:GetDescendants()) do
-
-		if object:IsA("BasePart") then
-
-			local relativePosition =
-				pivot:PointToObjectSpace(
-					object.Position
-				)
-
-			local rotation =
-				object.CFrame
-				- object.CFrame.Position
-
-			object.Size =
-				object.Size * scale
-
-			object.CFrame =
-				pivot
-				* CFrame.new(
-					relativePosition * scale
-				)
-				* rotation
-
-		end
-
-	end
-
-end
-
-------------------------------------------------------------
--- FIND BEAK
-------------------------------------------------------------
 
 local function getBeakCFrame(model)
-
-	local beak =
-		model:FindFirstChild(
-			BEAK_NAME,
-			true
-		)
-
-	if beak then
-
-		if beak:IsA("Attachment") then
-			return beak.WorldCFrame
+	local found = model:FindFirstChild(BEAK_NAME, true)
+	if found then
+		if found:IsA("Attachment") then
+			return found.WorldCFrame
+		elseif found:IsA("BasePart") then
+			return found.CFrame
 		end
-
-		if beak:IsA("BasePart") then
-			return beak.CFrame
-		end
-
 	end
-
+	if FALLBACK_TO_MODEL_PIVOT then
+		return model:GetPivot()
+	end
 	return model:GetPivot()
-
 end
 
-------------------------------------------------------------
--- CREATE PELICAN
-------------------------------------------------------------
-
-local function createPelican()
-
-	local character =
-		player.Character
-
-	if not character then
-		return nil
+local function scaleModel(model, scale)
+	local pivot = model:GetPivot()
+	for _, inst in ipairs(model:GetDescendants()) do
+		if inst:IsA("BasePart") then
+			local relPos = pivot:PointToObjectSpace(inst.Position)
+			inst.Size = inst.Size * scale
+			-- Reposition translation; keep orientation
+			inst.CFrame = pivot * CFrame.new(relPos * scale) * (inst.CFrame - inst.CFrame.Position)
+		end
 	end
+end
 
-	local root =
-		character:FindFirstChild(
-			"HumanoidRootPart"
-		)
+local function estimatePenguinSegmentStep(penguinTemplateClone)
+	-- Use bounding box depth along forward-ish axis approximation.
+	-- We'll just use its overall bounding box size magnitude to get a step.
+	local cf, size = penguinTemplateClone:GetBoundingBox()
+	-- A single scalar step that tends to prevent gaps.
+	-- Since we don't know exact neck direction, we use size.Z as a heuristic.
+	local step = math.max(1, (size.Y + size.Z) * 0.5)
+	return step
+end
 
-	if not root then
-		return nil
-	end
+local function clonePelican()
+	local char = player.Character
+	if not char then return nil end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return nil end
 
-	local pelican =
-		PelicanTemplate:Clone()
+	local pelican = PelicanTemplate:Clone()
+	pelican.Name = "ClientPelican_" .. player.Name
+	pelican.Parent = workspace
 
-	pelican.Name =
-		"ClientPelican_" .. player.Name
+	setBlack(pelican)
+	scaleModel(pelican, PELICAN_SCALE)
 
-	pelican.Parent =
-		workspace
-
-	blacken(pelican)
-
-	scaleModel(
-		pelican,
-		PELICAN_SCALE
-	)
-
-	pelican:PivotTo(
-		root.CFrame
-	)
+	-- Teleport immediately to player
+	pelican:PivotTo(hrp.CFrame)
 
 	return pelican
-
 end
 
-------------------------------------------------------------
--- CREATE CYLINDER
-------------------------------------------------------------
+local function buildNeck(pelican)
+	local container = Instance.new("Folder")
+	container.Name = "ClientPenguinNeckStack"
+	container.Parent = pelican
 
-local function createCylinder(
-	parent,
-	index,
-	height
-)
+	local beakCF = getBeakCFrame(pelican)
+	local forward = beakCF.LookVector
 
-	local cylinder =
-		Instance.new("Part")
+	-- Clone a temp penguin to estimate step so the stack doesn't leave gaps
+	local temp = PenguinTemplate:Clone()
+	setBlack(temp)
+	scaleModel(temp, PENGUIN_SCALE)
+	local segStep = estimatePenguinSegmentStep(temp)
+	temp:Destroy()
 
-	cylinder.Name =
-		"Cylinder_" .. index
+	-- Decide overall length step distribution:
+	-- If NECK_LENGTH is shorter/longer than segStep*(count-1), we adjust.
+	local desiredTotal = NECK_LENGTH
+	local currentTotal = segStep * (NECK_COUNT - 1)
+	local lengthScale = (currentTotal > 0) and (desiredTotal / currentTotal) or 1
+	local step = segStep * lengthScale
 
-	cylinder.Shape =
-		Enum.PartType.Cylinder
-
-	--------------------------------------------------------
-	-- IMPORTANT:
-	--
-	-- Roblox Cylinder length is along the X axis.
-	--
-	-- So:
-	--
-	-- X = HEIGHT
-	-- Y = DIAMETER
-	-- Z = DIAMETER
-	--------------------------------------------------------
-
-	cylinder.Size =
-		Vector3.new(
-			height,
-			CYLINDER_DIAMETER,
-			CYLINDER_DIAMETER
-		)
-
-	--------------------------------------------------------
-	-- ROTATE THE CYLINDER 90 DEGREES AROUND Z.
-	--
-	-- This changes the cylinder's long X axis
-	-- into the WORLD Y axis.
-	--
-	-- Result:
-	--        |
-	--        |
-	--        |
-	--        |
-	--        |
-	--
-	-- NOT:
-	--  --------
-	--------------------------------------------------------
-
-	cylinder.CFrame =
-		CFrame.Angles(
-			0,
-			0,
-			math.rad(90)
-		)
-
-	cylinder.Color =
-		Color3.new(0, 0, 0)
-
-	cylinder.Material =
-		Enum.Material.SmoothPlastic
-
-	cylinder.Anchored =
-		true
-
-	cylinder.CanCollide =
-		false
-
-	cylinder.CanTouch =
-		false
-
-	cylinder.CanQuery =
-		false
-
-	cylinder.CastShadow =
-		false
-
-	cylinder.Parent =
-		parent
-
-	return cylinder
-
-end
-
-------------------------------------------------------------
--- CREATE TRUNK
-------------------------------------------------------------
-
-local function createTrunk(pelican)
-
-	local folder =
-		Instance.new("Folder")
-
-	folder.Name =
-		"VerticalCylinderTrunk"
-
-	folder.Parent =
-		pelican
-
-	--------------------------------------------------------
-	-- EACH SEGMENT IS THIS TALL
-	--------------------------------------------------------
-
-	local segmentHeight =
-		NECK_LENGTH
-		/ NECK_COUNT
-
-	local actualHeight =
-		segmentHeight
-		+ CYLINDER_OVERLAP
-
-	--------------------------------------------------------
-	-- CREATE CYLINDERS
-	--------------------------------------------------------
-
-	local cylinders = {}
+	-- Create penguins
+	local penguins = {}
 
 	for i = 1, NECK_COUNT do
+		local p = PenguinTemplate:Clone()
+		p.Name = ("Penguin_%02d"):format(i)
+		p.Parent = container
 
-		cylinders[i] =
-			createCylinder(
-				folder,
-				i,
-				actualHeight
-			)
+		setBlack(p)
+		scaleModel(p, PENGUIN_SCALE)
 
+		local dist = step * (i - 1)
+		local targetCF = beakCF * CFrame.new(-forward * dist)
+		p:PivotTo(targetCF)
+
+		table.insert(penguins, p)
 	end
 
-	--------------------------------------------------------
-	-- ANIMATION
-	--------------------------------------------------------
-
+	-- Insane connected animation
 	task.spawn(function()
-
-		local elapsed = 0
-
-		----------------------------------------------------
-		-- Current positions for smoothing
-		----------------------------------------------------
-
-		local currentPositions = {}
-
+		local t0 = os.clock()
 		while pelican.Parent do
+			local t = os.clock() - t0
+			local currentBeak = getBeakCFrame(pelican)
+			local fwd = currentBeak.LookVector
+			local right = currentBeak.RightVector
+			local up = currentBeak.UpVector
 
-			local dt =
-				RunService.Heartbeat:Wait()
+			-- fast jitter seed-ish changes
+			local baseYaw = math.sin(t * INSANE_BASE_SPEED * 1.1) * (0.6 + math.random() * 0.6)
+			local basePitch = math.cos(t * INSANE_BASE_SPEED * 0.9) * (0.4 + math.random() * 0.6)
 
-			elapsed += dt
+			-- For each segment, keep it anchored and still connected (no gaps)
+			for i, p in ipairs(penguins) do
+				if not p.Parent then break end
 
-			------------------------------------------------
-			-- BEAK
-			------------------------------------------------
+				local alpha = (i - 1) / math.max(1, NECK_COUNT - 1)
+				local dist = step * (i - 1)
 
-			local beak =
-				getBeakCFrame(
-					pelican
-				)
+				-- random shake (stronger for far segments)
+				local randX = (math.random() - 0.5) * 2
+				local randY = (math.random() - 0.5) * 2
+				local randZ = (math.random() - 0.5) * 2
 
-			local origin =
-				beak.Position
+				local jitterPos = (right * randX + up * randY) * (JITTER_STRENGTH * (0.1 + alpha))
+				local jitterRotYaw = (math.sin(t * INSANE_BASE_SPEED + i * 0.25) + randZ) * (ROT_INSANE_STRENGTH * 0.02 * (0.2 + alpha))
+				local jitterRotRoll = (math.cos(t * INSANE_BASE_SPEED * 1.2 + i * 0.18) + randY) * (ROT_INSANE_STRENGTH * 0.02 * (0.2 + alpha))
 
-			------------------------------------------------
-			-- USE THE WORLD'S UP DIRECTION.
-			--
-			-- This guarantees the cylinders themselves
-			-- remain VERTICAL.
-			------------------------------------------------
+				-- curved/twisting neck
+				local sway = math.sin(t * (INSANE_BASE_SPEED * 0.8) + i * 0.35) * SWAY_STRENGTH * (0.05 + alpha)
+				local pitch = (basePitch * (0.2 + alpha)) + sway * 0.2
+				local yaw = (baseYaw * (0.2 + alpha)) + jitterRotYaw
 
-			local WORLD_UP =
-				Vector3.new(
-					0,
-					1,
-					0
-				)
+				-- keep spacing exact -> no gaps by using step-driven placement only
+				local target = currentBeak
+					* CFrame.Angles(pitch, yaw, jitterRotRoll)
+					* CFrame.new(-fwd * dist)
+					* CFrame.new(jitterPos)
 
-			local forward =
-				beak.LookVector
+				-- fast smoothing so it looks chaotic but attached
+				local current = p:GetPivot()
+				p:PivotTo(current:Lerp(target, 0.18))
+			end
 
-			------------------------------------------------
-		
+			task.wait(UPDATE_DT)
+		end
+	end)
+end
+
+local function clearOld()
+	for _, inst in ipairs(workspace:GetChildren()) do
+		if inst:IsA("Model") and inst.Name == ("ClientPelican_" .. player.Name) then
+			inst:Destroy()
+		end
+	end
+end
+
+local function start()
+	clearOld()
+	local pelican = clonePelican()
+	if not pelican then return end
+	buildNeck(pelican)
+end
+
+if player.Character then
+	start()
+end
+
+player.CharacterAdded:Connect(function()
+	task.wait(0.2)
+	start()
+end)
