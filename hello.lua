@@ -1,6 +1,6 @@
 -- StarterPlayerScripts > LocalScript
--- GIANT SLOW ELEPHANT PELICAN
--- Vertical cylinder trunk + slow movement
+-- GIANT PELICAN / ELEPHANT TRUNK
+-- VERTICAL CYLINDER VERSION
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,41 +16,73 @@ local PelicanTemplate = Birds:WaitForChild("Pelican")
 
 local BEAK_NAME = "Beak2"
 
--- Giant size
+-- Giant pelican
 local PELICAN_SCALE = 20
 
--- Trunk
-local NECK_COUNT = 55
-local NECK_LENGTH = 260
-local CYLINDER_RADIUS = 5
+------------------------------------------------------------
+-- NECK
+------------------------------------------------------------
 
--- Trunk movement
-local WAVE_SPEED = 0.45
-local SIDE_SWAY = 18
-local FORWARD_SWAY = 12
-local VERTICAL_SWAY = 8
+-- Total height of the neck
+local NECK_LENGTH = 300
 
--- Whole giant movement
-local GIANT_SPEED = 2.0
-local TURN_AMOUNT = 0.15
+-- Number of vertical cylinders
+local NECK_COUNT = 30
 
--- Smoothness
-local SMOOTHNESS = 3
+-- Thickness of every cylinder
+local CYLINDER_DIAMETER = 12
+
+-- Slight overlap so there are NO visible gaps
+local CYLINDER_OVERLAP = 0.8
 
 ------------------------------------------------------------
--- BLACK PELICAN
+-- TRUNK MOVEMENT
+------------------------------------------------------------
+
+local SWAY_SPEED = 0.45
+
+-- Side-to-side movement of the trunk
+local SIDE_SWAY = 30
+
+-- Forward/backward movement
+local FORWARD_SWAY = 18
+
+-- Up/down wave
+local VERTICAL_SWAY = 8
+
+------------------------------------------------------------
+-- GIANT MOVEMENT
+------------------------------------------------------------
+
+-- Very slow movement, like an enormous animal
+local GIANT_SPEED = 1.2
+
+-- Gentle body turning
+local TURN_SPEED = 0.08
+
+------------------------------------------------------------
+-- SMOOTHNESS
+------------------------------------------------------------
+
+local FOLLOW_SPEED = 3
+
+------------------------------------------------------------
+-- BLACKEN PELICAN
 ------------------------------------------------------------
 
 local function blacken(model)
 
-	for _, obj in ipairs(model:GetDescendants()) do
+	for _, object in ipairs(model:GetDescendants()) do
 
-		if obj:IsA("BasePart") then
-			obj.Color = Color3.new(0, 0, 0)
-			obj.Material = Enum.Material.SmoothPlastic
+		if object:IsA("BasePart") then
 
-		elseif obj:IsA("Decal") then
-			obj.Transparency = 1
+			object.Color = Color3.new(0, 0, 0)
+			object.Material = Enum.Material.SmoothPlastic
+
+		elseif object:IsA("Decal") then
+
+			object.Transparency = 1
+
 		end
 
 	end
@@ -58,33 +90,33 @@ local function blacken(model)
 end
 
 ------------------------------------------------------------
--- SCALE
+-- SCALE PELICAN
 ------------------------------------------------------------
 
 local function scaleModel(model, scale)
 
 	local pivot = model:GetPivot()
 
-	for _, obj in ipairs(model:GetDescendants()) do
+	for _, object in ipairs(model:GetDescendants()) do
 
-		if obj:IsA("BasePart") then
+		if object:IsA("BasePart") then
 
-			local relative =
+			local relativePosition =
 				pivot:PointToObjectSpace(
-					obj.Position
+					object.Position
 				)
 
 			local rotation =
-				obj.CFrame
-				- obj.CFrame.Position
+				object.CFrame
+				- object.CFrame.Position
 
-			obj.Size =
-				obj.Size * scale
+			object.Size =
+				object.Size * scale
 
-			obj.CFrame =
+			object.CFrame =
 				pivot
 				* CFrame.new(
-					relative * scale
+					relativePosition * scale
 				)
 				* rotation
 
@@ -95,10 +127,10 @@ local function scaleModel(model, scale)
 end
 
 ------------------------------------------------------------
--- BEAK
+-- FIND BEAK
 ------------------------------------------------------------
 
-local function getBeak(model)
+local function getBeakCFrame(model)
 
 	local beak =
 		model:FindFirstChild(
@@ -123,7 +155,7 @@ local function getBeak(model)
 end
 
 ------------------------------------------------------------
--- PELICAN
+-- CREATE PELICAN
 ------------------------------------------------------------
 
 local function createPelican()
@@ -169,12 +201,13 @@ local function createPelican()
 end
 
 ------------------------------------------------------------
--- CYLINDER
+-- CREATE CYLINDER
 ------------------------------------------------------------
 
 local function createCylinder(
 	parent,
-	index
+	index,
+	height
 )
 
 	local cylinder =
@@ -185,6 +218,49 @@ local function createCylinder(
 
 	cylinder.Shape =
 		Enum.PartType.Cylinder
+
+	--------------------------------------------------------
+	-- IMPORTANT:
+	--
+	-- Roblox Cylinder length is along the X axis.
+	--
+	-- So:
+	--
+	-- X = HEIGHT
+	-- Y = DIAMETER
+	-- Z = DIAMETER
+	--------------------------------------------------------
+
+	cylinder.Size =
+		Vector3.new(
+			height,
+			CYLINDER_DIAMETER,
+			CYLINDER_DIAMETER
+		)
+
+	--------------------------------------------------------
+	-- ROTATE THE CYLINDER 90 DEGREES AROUND Z.
+	--
+	-- This changes the cylinder's long X axis
+	-- into the WORLD Y axis.
+	--
+	-- Result:
+	--        |
+	--        |
+	--        |
+	--        |
+	--        |
+	--
+	-- NOT:
+	--  --------
+	--------------------------------------------------------
+
+	cylinder.CFrame =
+		CFrame.Angles(
+			0,
+			0,
+			math.rad(90)
+		)
 
 	cylinder.Color =
 		Color3.new(0, 0, 0)
@@ -215,7 +291,7 @@ local function createCylinder(
 end
 
 ------------------------------------------------------------
--- MAIN TRUNK
+-- CREATE TRUNK
 ------------------------------------------------------------
 
 local function createTrunk(pelican)
@@ -224,10 +300,26 @@ local function createTrunk(pelican)
 		Instance.new("Folder")
 
 	folder.Name =
-		"CylinderTrunk"
+		"VerticalCylinderTrunk"
 
 	folder.Parent =
 		pelican
+
+	--------------------------------------------------------
+	-- EACH SEGMENT IS THIS TALL
+	--------------------------------------------------------
+
+	local segmentHeight =
+		NECK_LENGTH
+		/ NECK_COUNT
+
+	local actualHeight =
+		segmentHeight
+		+ CYLINDER_OVERLAP
+
+	--------------------------------------------------------
+	-- CREATE CYLINDERS
+	--------------------------------------------------------
 
 	local cylinders = {}
 
@@ -236,7 +328,8 @@ local function createTrunk(pelican)
 		cylinders[i] =
 			createCylinder(
 				folder,
-				i
+				i,
+				actualHeight
 			)
 
 	end
@@ -247,206 +340,13 @@ local function createTrunk(pelican)
 
 	task.spawn(function()
 
-		local time = 0
-
-		while pelican.Parent do
-
-			local dt =
-				RunService.Heartbeat:Wait()
-
-			time += dt
-
-			------------------------------------------------
-			-- BEAK
-			------------------------------------------------
-
-			local beak =
-				getBeak(pelican)
-
-			local origin =
-				beak.Position
-
-			local forward =
-				beak.LookVector
-
-			local right =
-				beak.RightVector
-
-			------------------------------------------------
-			-- JOINT POSITIONS
-			------------------------------------------------
-
-			local joints = {}
-
-			joints[1] =
-				origin
-
-			------------------------------------------------
-			-- CREATE CONNECTED TRUNK
-			------------------------------------------------
-
-			for i = 2, NECK_COUNT + 1 do
-
-				local alpha =
-					(i - 2)
-					/ NECK_COUNT
-
-				------------------------------------------------
-				-- SNAKE-LIKE WAVE
-				------------------------------------------------
-
-				local phase =
-					time
-					* WAVE_SPEED
-					+ alpha * 3.5
-
-				local side =
-					math.sin(phase)
-					* SIDE_SWAY
-					* alpha
-
-				local forwardWave =
-					math.cos(
-						phase * 0.7
-					)
-					* FORWARD_SWAY
-					* alpha
-
-				local vertical =
-					math.sin(
-						phase * 0.55
-						+ 1
-					)
-					* VERTICAL_SWAY
-					* alpha
-
-				------------------------------------------------
-				-- IMPORTANT:
-				-- THE TRUNK GROWS UPWARD.
-				------------------------------------------------
-
-				local basePosition =
-					origin
-					+ Vector3.new(
-						0,
-						(i - 1)
-						* (
-							NECK_LENGTH
-							/ NECK_COUNT
-						),
-						0
-					)
-
-				local target =
-					basePosition
-					+ right * side
-					+ forward * forwardWave
-					+ Vector3.new(
-						0,
-						vertical,
-						0
-					)
-
-				------------------------------------------------
-				-- CONNECT TO PREVIOUS JOINT
-				------------------------------------------------
-
-				local previous =
-					joints[i - 1]
-
-				local difference =
-					target - previous
-
-				if difference.Magnitude > 0 then
-
-					target =
-						previous
-						+ difference.Unit
-						* (
-							NECK_LENGTH
-							/ NECK_COUNT
-						)
-
-				end
-
-				joints[i] =
-					target
-
-			end
-
-			------------------------------------------------
-			-- DRAW CYLINDERS
-			------------------------------------------------
-
-			for i = 1, NECK_COUNT do
-
-				local a =
-					joints[i]
-
-				local b =
-					joints[i + 1]
-
-				local center =
-					(a + b) / 2
-
-				local length =
-					(b - a).Magnitude
-
-				local cylinder =
-					cylinders[i]
-
-				------------------------------------------------
-				-- VERTICAL CYLINDER
-				--
-				-- Y AXIS ALWAYS POINTS UP.
-				------------------------------------------------
-
-				local targetCFrame =
-					CFrame.new(center)
-
-				local targetSize =
-					Vector3.new(
-						CYLINDER_RADIUS * 2,
-						length,
-						CYLINDER_RADIUS * 2
-					)
-
-				local smooth =
-					math.clamp(
-						dt * SMOOTHNESS,
-						0,
-						1
-					)
-
-				cylinder.CFrame =
-					cylinder.CFrame:Lerp(
-						targetCFrame,
-						smooth
-					)
-
-				cylinder.Size =
-					cylinder.Size:Lerp(
-						targetSize,
-						smooth
-					)
-
-			end
-
-		end
-
-	end)
-
-end
-
-------------------------------------------------------------
--- GIANT ELEPHANT MOVEMENT
-------------------------------------------------------------
-
-local function createMovement(pelican)
-
-	task.spawn(function()
-
 		local elapsed = 0
+
+		----------------------------------------------------
+		-- Current positions for smoothing
+		----------------------------------------------------
+
+		local currentPositions = {}
 
 		while pelican.Parent do
 
@@ -456,121 +356,33 @@ local function createMovement(pelican)
 			elapsed += dt
 
 			------------------------------------------------
-			-- VERY SLOW GIANT MOVEMENT
+			-- BEAK
 			------------------------------------------------
 
-			local forward =
-				pelican:GetPivot().LookVector
-
-			------------------------------------------------
-			-- Slow forward walk
-			------------------------------------------------
-
-			local movement =
-				forward
-				* GIANT_SPEED
-				* dt
-
-			------------------------------------------------
-			-- VERY GENTLE BODY SWAY
-			------------------------------------------------
-
-			local sway =
-				math.sin(
-					elapsed * 0.45
+			local beak =
+				getBeakCFrame(
+					pelican
 				)
-				* TURN_AMOUNT
 
-			local current =
-				pelican:GetPivot()
+			local origin =
+				beak.Position
 
-			local newCFrame =
-				current
-				+ movement
+			------------------------------------------------
+			-- USE THE WORLD'S UP DIRECTION.
+			--
+			-- This guarantees the cylinders themselves
+			-- remain VERTICAL.
+			------------------------------------------------
 
-			newCFrame =
-				newCFrame
-				* CFrame.Angles(
+			local WORLD_UP =
+				Vector3.new(
 					0,
-					sway * dt,
+					1,
 					0
 				)
 
-			pelican:PivotTo(
-				newCFrame
-			)
+			local forward =
+				beak.LookVector
 
-		end
-
-	end)
-
-end
-
-------------------------------------------------------------
--- CLEAN OLD
-------------------------------------------------------------
-
-local function clearOld()
-
-	local name =
-		"ClientPelican_" .. player.Name
-
-	for _, obj in ipairs(
-		workspace:GetChildren()
-	) do
-
-		if obj:IsA("Model")
-			and obj.Name == name then
-
-			obj:Destroy()
-
-		end
-
-	end
-
-end
-
-------------------------------------------------------------
--- START
-------------------------------------------------------------
-
-local function start()
-
-	clearOld()
-
-	local pelican =
-		createPelican()
-
-	if not pelican then
-		return
-	end
-
-	createTrunk(
-		pelican
-	)
-
-	createMovement(
-		pelican
-	)
-
-end
-
-------------------------------------------------------------
--- CHARACTER
-------------------------------------------------------------
-
-if player.Character then
-
-	task.wait(0.5)
-
-	start()
-
-end
-
-player.CharacterAdded:Connect(function()
-
-	task.wait(0.5)
-
-	start()
-
-end)
+			------------------------------------------------
+		
