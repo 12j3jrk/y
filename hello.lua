@@ -14,33 +14,37 @@ local PelicanTemplate = Birds:WaitForChild("Pelican")
 -- =========================================================
 
 local PELICAN_SCALE = 20
-local NECK_SCALE = 10
 
--- Make the chain extremely long.
--- Increase this if you literally want more segments.
-local NECK_SEGMENTS = 180
+-- How many Neck3 copies are created.
+-- Very high so it visually appears infinite.
+local NECK_COUNT = 300
 
--- How slowly the neck moves.
-local NECK_SPEED = 0.42
+-- Very slow movement.
+local NECK_SPEED = 0.22
 
--- How much the neck bends.
-local BEND_X = 0.055
-local BEND_Y = 0.075
-local BEND_Z = 0.035
+-- Joint-like bending.
+local BEND_X = math.rad(1.8)
+local BEND_Y = math.rad(2.5)
+local BEND_Z = math.rad(1.2)
 
--- How much movement travels down the neck.
-local WAVE_LENGTH = 18
+-- Distance between repeated neck pieces.
+-- 1 = exactly their measured height.
+-- Lower = slight overlap.
+local NECK_OVERLAP = 0.94
+
+-- How far the bending wave travels down the neck.
+local WAVE_LENGTH = 24
 
 -- Smoothness.
-local FOLLOW_SPEED = 4
+local SMOOTHNESS = 0.055
 
 -- =========================================================
 -- NAME HIDING
 -- =========================================================
 
-local function shouldHide(inst)
+local function nameShouldBeInvisible(name)
 
-	local name = string.lower(inst.Name)
+	name = string.lower(name)
 
 	return
 		string.find(name, "head", 1, true) ~= nil
@@ -50,53 +54,53 @@ end
 
 local function hideHeadAndBeak(model)
 
-	for _, inst in ipairs(model:GetDescendants()) do
+	for _, object in ipairs(model:GetDescendants()) do
 
-		if shouldHide(inst) then
+		if nameShouldBeInvisible(object.Name) then
 
-			if inst:IsA("BasePart") then
-				inst.Transparency = 1
+			if object:IsA("BasePart") then
+				object.Transparency = 1
 
-			elseif inst:IsA("Decal") then
-				inst.Transparency = 1
+			elseif object:IsA("Decal") then
+				object.Transparency = 1
 
-			elseif inst:IsA("Texture") then
-				inst.Transparency = 1
+			elseif object:IsA("Texture") then
+				object.Transparency = 1
 
-			elseif inst:IsA("ParticleEmitter") then
-				inst.Enabled = false
+			elseif object:IsA("ParticleEmitter") then
+				object.Enabled = false
 
-			elseif inst:IsA("Trail") then
-				inst.Enabled = false
+			elseif object:IsA("Trail") then
+				object.Enabled = false
 
-			elseif inst:IsA("Beam") then
-				inst.Enabled = false
+			elseif object:IsA("Beam") then
+				object.Enabled = false
 			end
 		end
 	end
 end
 
 -- =========================================================
--- BLACK
+-- BLACK MODEL
 -- =========================================================
 
 local function makeBlack(model)
 
-	for _, inst in ipairs(model:GetDescendants()) do
+	for _, object in ipairs(model:GetDescendants()) do
 
-		if inst:IsA("BasePart") then
+		if object:IsA("BasePart") then
 
-			inst.Color = Color3.new(0, 0, 0)
+			object.Color = Color3.new(0, 0, 0)
 
-			if inst.Material ~= Enum.Material.Neon then
-				inst.Material = Enum.Material.SmoothPlastic
+			if object.Material ~= Enum.Material.Neon then
+				object.Material = Enum.Material.SmoothPlastic
 			end
 		end
 	end
 end
 
 -- =========================================================
--- SAFE MODEL SCALING
+-- MODEL SCALE
 -- =========================================================
 
 local function scaleModel(model, scale)
@@ -105,29 +109,43 @@ local function scaleModel(model, scale)
 		return
 	end
 
-	-- Use Roblox's native model scaling.
-	-- This avoids the old manual CFrame distortion.
+	-- Native Roblox scaling.
+	-- Does not manually distort individual parts.
 	pcall(function()
 		model:ScaleTo(scale)
 	end)
 end
 
 -- =========================================================
--- FIND NECK3 / NECK4
+-- FIND OBJECT
 -- =========================================================
 
-local function findNamedObject(root, wantedName)
+local function findObject(root, objectName)
 
-	local exact = root:FindFirstChild(wantedName, true)
+	-- Exact recursive search first.
+	local object =
+		root:FindFirstChild(
+			objectName,
+			true
+		)
 
-	if exact then
-		return exact
+	if object then
+		return object
 	end
 
-	for _, inst in ipairs(root:GetDescendants()) do
+	-- Case-insensitive fallback.
+	local wanted =
+		string.lower(objectName)
 
-		if string.lower(inst.Name) == string.lower(wantedName) then
-			return inst
+	for _, descendant in ipairs(
+		root:GetDescendants()
+	) do
+
+		if string.lower(
+			descendant.Name
+		) == wanted then
+
+			return descendant
 		end
 	end
 
@@ -135,10 +153,10 @@ local function findNamedObject(root, wantedName)
 end
 
 -- =========================================================
--- GET WORLD CFRAME
+-- GET PIVOT
 -- =========================================================
 
-local function getObjectCFrame(object)
+local function getPivot(object)
 
 	if object:IsA("Model") then
 		return object:GetPivot()
@@ -154,30 +172,30 @@ local function getObjectCFrame(object)
 end
 
 -- =========================================================
--- SET WORLD CFRAME
+-- SET PIVOT
 -- =========================================================
 
-local function setObjectCFrame(object, cf)
+local function setPivot(object, cframe)
 
 	if object:IsA("Model") then
 
-		object:PivotTo(cf)
+		object:PivotTo(cframe)
 
 	elseif object:IsA("BasePart") then
 
-		object.CFrame = cf
+		object.CFrame = cframe
 
 	elseif object:IsA("Attachment") then
 
-		object.WorldCFrame = cf
+		object.WorldCFrame = cframe
 	end
 end
 
 -- =========================================================
--- GET BOUNDING BOX
+-- GET MODEL SIZE
 -- =========================================================
 
-local function getSize(object)
+local function getObjectSize(object)
 
 	if object:IsA("Model") then
 
@@ -195,27 +213,30 @@ local function getSize(object)
 end
 
 -- =========================================================
--- FIND TOP/BOTTOM AXIS
+-- GET NECK LENGTH
 -- =========================================================
 
-local function getStackDistance(object)
+local function getNeckLength(neck)
 
 	local size =
-		getSize(object)
+		getObjectSize(neck)
 
-	-- The neck is expected to extend vertically.
+	-- Neck pieces are stacked vertically.
 	--
-	-- Use Y first, but make sure the value isn't tiny.
-	local height =
-		math.max(
-			math.abs(size.Y),
-			math.abs(size.Z),
-			0.01
-		)
+	-- We use Y as the primary axis.
+	-- If Y is unusably small, use the largest axis.
+	local y =
+		math.abs(size.Y)
 
-	-- Slight overlap makes the repeated pieces
-	-- visually merge instead of showing gaps.
-	return height * 0.92
+	if y > 0.01 then
+		return y * NECK_OVERLAP
+	end
+
+	return math.max(
+		math.abs(size.X),
+		math.abs(size.Z),
+		0.01
+	) * NECK_OVERLAP
 end
 
 -- =========================================================
@@ -231,12 +252,12 @@ local function createPelican()
 		return nil
 	end
 
-	local hrp =
+	local root =
 		character:FindFirstChild(
 			"HumanoidRootPart"
 		)
 
-	if not hrp then
+	if not root then
 		return nil
 	end
 
@@ -244,13 +265,13 @@ local function createPelican()
 		PelicanTemplate:Clone()
 
 	pelican.Name =
-		"ClientPelican_" ..
-		player.Name
+		"ClientPelican_"
+		.. player.Name
 
 	pelican.Parent =
 		workspace
 
-	-- Correct proportional scaling.
+	-- Scale the COMPLETE pelican correctly.
 	scaleModel(
 		pelican,
 		PELICAN_SCALE
@@ -260,31 +281,37 @@ local function createPelican()
 		pelican
 	)
 
+	-- Hide absolutely anything whose
+	-- name contains "head" or "beak".
 	hideHeadAndBeak(
 		pelican
 	)
 
 	pelican:PivotTo(
-		hrp.CFrame
+		root.CFrame
 	)
 
 	return pelican
 end
 
 -- =========================================================
--- BUILD NECK
+-- BUILD INFINITE NECK
 -- =========================================================
 
-local function buildInfiniteNeck(pelican)
+local function buildNeck(pelican)
+
+	-- =====================================================
+	-- FIND NECK3 AND NECK4
+	-- =====================================================
 
 	local neck3 =
-		findNamedObject(
+		findObject(
 			pelican,
 			"Neck3"
 		)
 
 	local neck4 =
-		findNamedObject(
+		findObject(
 			pelican,
 			"Neck4"
 		)
@@ -292,7 +319,7 @@ local function buildInfiniteNeck(pelican)
 	if not neck3 then
 
 		warn(
-			"Could not find Neck3 inside Pelican."
+			"[Infinite Neck] Neck3 was not found."
 		)
 
 		return
@@ -301,7 +328,7 @@ local function buildInfiniteNeck(pelican)
 	if not neck4 then
 
 		warn(
-			"Could not find Neck4 inside Pelican."
+			"[Infinite Neck] Neck4 was not found."
 		)
 
 		return
@@ -321,124 +348,87 @@ local function buildInfiniteNeck(pelican)
 		pelican
 
 	-- =====================================================
-	-- ORIGINAL NECK4
+	-- HIDE ORIGINAL HEAD/BEAK OBJECTS
 	-- =====================================================
+
+	hideHeadAndBeak(
+		neck3
+	)
 
 	hideHeadAndBeak(
 		neck4
 	)
 
 	-- =====================================================
-	-- TEMPLATE NECK3
+	-- ORIGINAL NECK4 POSITION
 	-- =====================================================
 
-	local template =
-		neck3:Clone()
-
-	template.Name =
-		"Neck3_TEMPLATE"
-
-	template.Parent =
-		container
-
-	scaleModel(
-		template,
-		NECK_SCALE
-	)
-
-	makeBlack(
-		template
-	)
-
-	hideHeadAndBeak(
-		template
-	)
-
-	-- We don't want the template itself
-	-- visible in the chain.
-	local templateTransparency = {}
-
-	for _, inst in ipairs(
-		template:GetDescendants()
-	) do
-
-		if inst:IsA("BasePart") then
-
-			templateTransparency[inst] =
-				inst.Transparency
-
-			inst.Transparency = 1
-		end
-	end
-
-	-- =====================================================
-	-- START POSITION
-	-- =====================================================
-
-	local neck4CF =
-		getObjectCFrame(
+	local neck4CFrame =
+		getPivot(
 			neck4
 		)
 
-	if not neck4CF then
+	if not neck4CFrame then
+
+		warn(
+			"[Infinite Neck] Could not get Neck4 pivot."
+		)
+
 		return
 	end
 
 	-- =====================================================
-	-- SEGMENT DISTANCE
+	-- NECK3 SIZE
 	-- =====================================================
 
-	local segmentDistance =
-		getStackDistance(
-			template
+	local spacing =
+		getNeckLength(
+			neck3
 		)
 
 	-- =====================================================
-	-- CREATE CHAIN
+	-- CREATE REPEATING NECK3
 	-- =====================================================
 
 	local segments = {}
 
-	for i = 1, NECK_SEGMENTS do
+	for i = 1, NECK_COUNT do
 
-		local segment =
+		local clone =
 			neck3:Clone()
 
-		segment.Name =
-			"Neck3_Infinite_" ..
-			string.format(
+		clone.Name =
+			"Neck3_Infinite_"
+			.. string.format(
 				"%03d",
 				i
 			)
 
-		segment.Parent =
+		clone.Parent =
 			container
 
-		-- Correct scale.
-		scaleModel(
-			segment,
-			NECK_SCALE
-		)
+		-- Keep the same size as the original Neck3.
+		-- No additional scaling here.
 
 		makeBlack(
-			segment
+			clone
 		)
 
 		hideHeadAndBeak(
-			segment
+			clone
 		)
 
 		-- =================================================
-		-- STACK
+		-- STACK DIRECTLY ON NECK4
 		-- =================================================
 
 		local distance =
-			segmentDistance
+			spacing
 			*
 			(i - 1)
 
 		local target =
-			neck4CF
+			neck4CFrame
 			*
 			CFrame.new(
 				0,
@@ -446,25 +436,42 @@ local function buildInfiniteNeck(pelican)
 				0
 			)
 
-		setObjectCFrame(
-			segment,
+		setPivot(
+			clone,
 			target
 		)
 
 		table.insert(
 			segments,
 			{
-				model = segment,
-				index = i,
-				base = target
+				object = clone,
+				index = i
 			}
 		)
 	end
 
-	template:Destroy()
+	-- =====================================================
+	-- HIDE ORIGINAL NECK3
+	-- =====================================================
+
+	-- The original Neck3 is replaced by the generated chain.
+	if neck3:IsA("BasePart") then
+		neck3.Transparency = 1
+
+	elseif neck3:IsA("Model") then
+
+		for _, object in ipairs(
+			neck3:GetDescendants()
+		) do
+
+			if object:IsA("BasePart") then
+				object.Transparency = 1
+			end
+		end
+	end
 
 	-- =====================================================
-	-- JOINT-LIKE MOTION
+	-- JOINT-LIKE MOVEMENT
 	-- =====================================================
 
 	task.spawn(function()
@@ -478,102 +485,103 @@ local function buildInfiniteNeck(pelican)
 			container.Parent
 		do
 
-			local now =
-				os.clock()
-
 			local elapsed =
-				now - startTime
+				os.clock()
+				-
+				startTime
 
-			-- Current Neck4 position is the anchor.
-			local currentNeck4 =
-				getObjectCFrame(
+			-- Always follow Neck4.
+			local anchor =
+				getPivot(
 					neck4
 				)
 
-			if not currentNeck4 then
+			if not anchor then
 				break
 			end
+
+			-- =============================================
+			-- MOVE EACH JOINT
+			-- =============================================
 
 			for _, data in ipairs(
 				segments
 			) do
 
 				local segment =
-					data.model
+					data.object
+
+				local i =
+					data.index
 
 				if not segment.Parent then
 					continue
 				end
 
-				local i =
-					data.index
+				-- =========================================
+				-- DELAYED WAVE
+				-- =========================================
 
-				-- =============================================
-				-- WAVE DELAY
-				-- =============================================
-
-				local waveOffset =
+				local delay =
 					(i - 1)
 					/
 					WAVE_LENGTH
 
-				-- =============================================
-				-- SLOW JOINT MOTION
-				-- =============================================
-
-				local waveTime =
+				local wave =
 					elapsed
 					*
 					NECK_SPEED
 					-
-					waveOffset
+					delay
 
-				-- Several overlapping waves make it
-				-- look like individual joints following
-				-- the one above them.
-				local x =
+				-- =========================================
+				-- JOINT ROTATION
+				-- =========================================
+
+				local pitch =
+
 					math.sin(
-						waveTime
+						wave
 					)
 					*
 					BEND_X
-					*
-					(0.35 + i / NECK_SEGMENTS)
 
-				local y =
+				local yaw =
+
 					math.sin(
-						waveTime
-						* 0.73
-						+ 1.7
+						wave
+						*
+						0.78
+						+
+						1.1
 					)
 					*
 					BEND_Y
-					*
-					(0.35 + i / NECK_SEGMENTS)
 
-				local z =
+				local roll =
+
 					math.cos(
-						waveTime
-						* 0.58
-						+ 0.8
+						wave
+						*
+						0.63
+						+
+						0.6
 					)
 					*
 					BEND_Z
-					*
-					(0.35 + i / NECK_SEGMENTS)
 
-				-- =============================================
-				-- POSITION ALONG NECK4'S AXIS
-				-- =============================================
+				-- =========================================
+				-- POSITION
+				-- =========================================
 
 				local distance =
-					segmentDistance
+					spacing
 					*
 					(i - 1)
 
 				local target =
 
-					currentNeck4
+					anchor
 
 					*
 					CFrame.new(
@@ -584,38 +592,29 @@ local function buildInfiniteNeck(pelican)
 
 					*
 					CFrame.Angles(
-						x,
-						y,
-						z
+						pitch,
+						yaw,
+						roll
 					)
 
-				-- =============================================
-				-- FOLLOWING MOTION
-				-- =============================================
+				-- =========================================
+				-- SMOOTH JOINT MOTION
+				-- =========================================
 
 				local current =
-					getObjectCFrame(
+					getPivot(
 						segment
 					)
 
 				if current then
 
-					local alpha =
-						math.clamp(
-							FOLLOW_SPEED
-							*
-							0.02,
-							0,
-							1
-						)
-
 					local smooth =
 						current:Lerp(
 							target,
-							alpha
+							SMOOTHNESS
 						)
 
-					setObjectCFrame(
+					setPivot(
 						segment,
 						smooth
 					)
@@ -628,26 +627,26 @@ local function buildInfiniteNeck(pelican)
 end
 
 -- =========================================================
--- CLEAR OLD
+-- REMOVE OLD
 -- =========================================================
 
 local function clearOld()
 
-	local oldName =
-		"ClientPelican_" ..
-		player.Name
+	local name =
+		"ClientPelican_"
+		.. player.Name
 
-	for _, inst in ipairs(
+	for _, object in ipairs(
 		workspace:GetChildren()
 	) do
 
 		if
-			inst:IsA("Model")
+			object:IsA("Model")
 			and
-			inst.Name == oldName
+			object.Name == name
 		then
 
-			inst:Destroy()
+			object:Destroy()
 		end
 	end
 end
@@ -667,7 +666,7 @@ local function start()
 		return
 	end
 
-	buildInfiniteNeck(
+	buildNeck(
 		pelican
 	)
 end
