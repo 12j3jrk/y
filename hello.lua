@@ -1,84 +1,58 @@
--- StarterPlayerScripts > LocalScript
+-- LocalScript
+-- Place in StarterPlayerScripts
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
-local Birds = ReplicatedStorage:WaitForChild("Birds")
+local Player = Players.LocalPlayer
 
+local Birds = ReplicatedStorage:WaitForChild("Birds")
 local PelicanTemplate = Birds:WaitForChild("Pelican")
 
 -- =========================================================
 -- SETTINGS
 -- =========================================================
 
-local PELICAN_SCALE = 20
+-- MASSIVE
+local PELICAN_SCALE = 90
 
--- How many Neck3 copies are created.
--- Very high so it visually appears infinite.
-local NECK_COUNT = 300
-
--- Very slow movement.
-local NECK_SPEED = 0.22
-
--- Joint-like bending.
-local BEND_X = math.rad(1.8)
-local BEND_Y = math.rad(2.5)
-local BEND_Z = math.rad(1.2)
-
--- Distance between repeated neck pieces.
--- 1 = exactly their measured height.
--- Lower = slight overlap.
-local NECK_OVERLAP = 0.94
-
--- How far the bending wave travels down the neck.
-local WAVE_LENGTH = 24
-
--- Smoothness.
-local SMOOTHNESS = 0.055
+-- How high above the player/map the Pelican stays.
+local SKY_HEIGHT = 700
 
 -- =========================================================
--- NAME HIDING
+-- SWARM
 -- =========================================================
 
-local function nameShouldBeInvisible(name)
+-- Extremely fast initial swarm.
+local SWARM_DURATION = 8
+local SWARM_SPEED = 420
 
-	name = string.lower(name)
+-- How far around the player the swarm travels.
+local SWARM_RADIUS = 850
 
-	return
-		string.find(name, "head", 1, true) ~= nil
-		or
-		string.find(name, "beak", 1, true) ~= nil
-end
+-- Vertical movement during swarm.
+local SWARM_VERTICAL = 260
 
-local function hideHeadAndBeak(model)
+-- =========================================================
+-- ROAM
+-- =========================================================
 
-	for _, object in ipairs(model:GetDescendants()) do
+local ROAM_SPEED = 170
 
-		if nameShouldBeInvisible(object.Name) then
+local ROAM_RADIUS = 1800
+local ROAM_MIN_HEIGHT = 650
+local ROAM_MAX_HEIGHT = 1100
 
-			if object:IsA("BasePart") then
-				object.Transparency = 1
+-- =========================================================
+-- PROXIMITY
+-- =========================================================
 
-			elseif object:IsA("Decal") then
-				object.Transparency = 1
+-- How close the player needs to physically get.
+local WARNING_DISTANCE = 100
 
-			elseif object:IsA("Texture") then
-				object.Transparency = 1
-
-			elseif object:IsA("ParticleEmitter") then
-				object.Enabled = false
-
-			elseif object:IsA("Trail") then
-				object.Enabled = false
-
-			elseif object:IsA("Beam") then
-				object.Enabled = false
-			end
-		end
-	end
-end
+-- Don't spam the notification.
+local WARNING_COOLDOWN = 4
 
 -- =========================================================
 -- BLACK MODEL
@@ -90,166 +64,592 @@ local function makeBlack(model)
 
 		if object:IsA("BasePart") then
 
-			object.Color = Color3.new(0, 0, 0)
+			object.Color =
+				Color3.new(
+					0,
+					0,
+					0
+				)
 
-			if object.Material ~= Enum.Material.Neon then
-				object.Material = Enum.Material.SmoothPlastic
+			object.Material =
+				Enum.Material.SmoothPlastic
+
+		elseif object:IsA("Decal") then
+
+			object.Transparency = 1
+
+		elseif object:IsA("Texture") then
+
+			object.Transparency = 1
+		end
+	end
+end
+
+-- =========================================================
+-- HIDE HEAD / BEAK
+-- =========================================================
+
+local function hideHeadAndBeak(model)
+
+	for _, object in ipairs(
+		model:GetDescendants()
+	) do
+
+		local name =
+			string.lower(
+				object.Name
+			)
+
+		if
+			string.find(
+				name,
+				"head",
+				1,
+				true
+			)
+			or
+			string.find(
+				name,
+				"beak",
+				1,
+				true
+			)
+		then
+
+			if object:IsA("BasePart") then
+				object.Transparency = 1
+
+			elseif object:IsA("Decal") then
+				object.Transparency = 1
+
+			elseif object:IsA("Texture") then
+				object.Transparency = 1
 			end
 		end
 	end
 end
 
 -- =========================================================
--- MODEL SCALE
+-- FIND ANIMATION
 -- =========================================================
 
-local function scaleModel(model, scale)
+local function findFlyAnimation(model)
 
-	if not model:IsA("Model") then
-		return
-	end
-
-	-- Native Roblox scaling.
-	-- Does not manually distort individual parts.
-	pcall(function()
-		model:ScaleTo(scale)
-	end)
-end
-
--- =========================================================
--- FIND OBJECT
--- =========================================================
-
-local function findObject(root, objectName)
-
-	-- Exact recursive search first.
-	local object =
-		root:FindFirstChild(
-			objectName,
+	local animation =
+		model:FindFirstChild(
+			"Fly",
 			true
 		)
 
-	if object then
-		return object
-	end
+	if animation
+		and animation:IsA("Animation")
+	then
 
-	-- Case-insensitive fallback.
-	local wanted =
-		string.lower(objectName)
-
-	for _, descendant in ipairs(
-		root:GetDescendants()
-	) do
-
-		if string.lower(
-			descendant.Name
-		) == wanted then
-
-			return descendant
-		end
+		return animation
 	end
 
 	return nil
 end
 
 -- =========================================================
--- GET PIVOT
+-- GET / CREATE ANIMATION CONTROLLER
 -- =========================================================
 
-local function getPivot(object)
+local function getAnimationController(model)
 
-	if object:IsA("Model") then
-		return object:GetPivot()
+	local controller =
+		model:FindFirstChildOfClass(
+			"AnimationController"
+		)
 
-	elseif object:IsA("BasePart") then
-		return object.CFrame
+	if not controller then
 
-	elseif object:IsA("Attachment") then
-		return object.WorldCFrame
+		controller =
+			Instance.new(
+				"AnimationController"
+			)
+
+		controller.Name =
+			"AnimationController"
+
+		controller.Parent =
+			model
 	end
 
-	return nil
+	local animator =
+		controller:FindFirstChildOfClass(
+			"Animator"
+		)
+
+	if not animator then
+
+		animator =
+			Instance.new(
+				"Animator"
+			)
+
+		animator.Parent =
+			controller
+	end
+
+	return controller, animator
 end
 
 -- =========================================================
--- SET PIVOT
+-- PLAY FLY
 -- =========================================================
 
-local function setPivot(object, cframe)
+local function playFlyAnimation(model)
 
-	if object:IsA("Model") then
+	local animation =
+		findFlyAnimation(
+			model
+		)
 
-		object:PivotTo(cframe)
+	if not animation then
 
-	elseif object:IsA("BasePart") then
+		warn(
+			"[Sky Pelican] Could not find Animation named 'Fly'."
+		)
 
-		object.CFrame = cframe
-
-	elseif object:IsA("Attachment") then
-
-		object.WorldCFrame = cframe
+		return nil
 	end
+
+	local controller, animator =
+		getAnimationController(
+			model
+		)
+
+	local success, track =
+		pcall(function()
+
+			return animator:LoadAnimation(
+				animation
+			)
+
+		end)
+
+	if not success or not track then
+
+		warn(
+			"[Sky Pelican] Failed to load Fly animation."
+		)
+
+		return nil
+	end
+
+	track.Looped = true
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play(
+		0.2,
+		1,
+		1
+	)
+
+	return track
 end
 
 -- =========================================================
--- GET MODEL SIZE
+-- CREATE GIANT PELICAN
 -- =========================================================
 
-local function getObjectSize(object)
+local function createGiantPelican()
 
-	if object:IsA("Model") then
+	local pelican =
+		PelicanTemplate:Clone()
 
-		local _, size =
-			object:GetBoundingBox()
+	pelican.Name =
+		"MassiveSkyPelican"
 
-		return size
+	pelican.Parent =
+		workspace
 
-	elseif object:IsA("BasePart") then
+	-- =====================================================
+	-- MAKE SURE IT IS A MODEL
+	-- =====================================================
 
-		return object.Size
+	if not pelican:IsA("Model") then
+
+		warn(
+			"[Sky Pelican] Pelican isn't a Model."
+		)
+
+		pelican:Destroy()
+
+		return nil
 	end
 
-	return Vector3.one
+	-- =====================================================
+	-- HUMANOID
+	-- =====================================================
+
+	local humanoid =
+		pelican:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	if not humanoid then
+
+		humanoid =
+			Instance.new(
+				"Humanoid"
+			)
+
+		humanoid.Name =
+			"Humanoid"
+
+		humanoid.DisplayDistanceType =
+			Enum.HumanoidDisplayDistanceType.None
+
+		humanoid.HealthDisplayType =
+			Enum.HumanoidHealthDisplayType.AlwaysOff
+
+		humanoid.Parent =
+			pelican
+	end
+
+	-- =====================================================
+	-- SCALE
+	-- =====================================================
+
+	local success =
+		pcall(function()
+
+			pelican:ScaleTo(
+				PELICAN_SCALE
+			)
+
+		end)
+
+	if not success then
+
+		warn(
+			"[Sky Pelican] Failed to scale Pelican."
+		)
+	end
+
+	-- =====================================================
+	-- BLACK
+	-- =====================================================
+
+	makeBlack(
+		pelican
+	)
+
+	hideHeadAndBeak(
+		pelican
+	)
+
+	-- =====================================================
+	-- ANIMATION
+	-- =====================================================
+
+	playFlyAnimation(
+		pelican
+	)
+
+	return pelican
 end
 
 -- =========================================================
--- GET NECK LENGTH
+-- RANDOM SKY POSITION
 -- =========================================================
 
-local function getNeckLength(neck)
+local function getSkyPosition(
+	center,
+	radius
+)
 
-	local size =
-		getObjectSize(neck)
+	local angle =
+		math.random()
+		*
+		math.pi
+		*
+		2
 
-	-- Neck pieces are stacked vertically.
-	--
-	-- We use Y as the primary axis.
-	-- If Y is unusably small, use the largest axis.
+	local distance =
+		math.sqrt(
+			math.random()
+		)
+		*
+		radius
+
+	local x =
+		math.cos(angle)
+		*
+		distance
+
+	local z =
+		math.sin(angle)
+		*
+		distance
+
 	local y =
-		math.abs(size.Y)
+		math.random(
+			ROAM_MIN_HEIGHT,
+			ROAM_MAX_HEIGHT
+		)
 
-	if y > 0.01 then
-		return y * NECK_OVERLAP
-	end
-
-	return math.max(
-		math.abs(size.X),
-		math.abs(size.Z),
-		0.01
-	) * NECK_OVERLAP
+	return center
+		+
+		Vector3.new(
+			x,
+			y,
+			z
+		)
 end
 
 -- =========================================================
--- CREATE PELICAN
+-- SWARM MOVEMENT
 -- =========================================================
 
-local function createPelican()
+local function swarmPelican(
+	pelican,
+	startPosition
+)
+
+	local start =
+		os.clock()
+
+	local lastPosition =
+		startPosition
+
+	pelican:PivotTo(
+		CFrame.lookAt(
+			startPosition,
+			startPosition
+			+
+			Vector3.new(
+				1,
+				0,
+				0
+			)
+		)
+	)
+
+	while
+		pelican.Parent
+		and
+		os.clock() - start
+		<
+		SWARM_DURATION
+	do
+
+		local elapsed =
+			os.clock()
+			-
+			start
+
+		local angle =
+			elapsed
+			*
+			(
+				SWARM_SPEED
+				/
+				SWARM_RADIUS
+			)
+
+		-- Rapid looping path around the sky.
+		local x =
+			math.cos(
+				angle
+			)
+			*
+			SWARM_RADIUS
+
+		local z =
+			math.sin(
+				angle
+			)
+			*
+			SWARM_RADIUS
+
+		-- Rapid vertical swooping.
+		local y =
+			SKY_HEIGHT
+			+
+			math.sin(
+				angle
+				*
+				2.7
+			)
+			*
+			SWARM_VERTICAL
+
+		local target =
+			startPosition
+			+
+			Vector3.new(
+				x,
+				y - SKY_HEIGHT,
+				z
+			)
+
+		local current =
+			pelican:GetPivot()
+
+		local currentPosition =
+			current.Position
+
+		local direction =
+			target
+			-
+			currentPosition
+
+		if direction.Magnitude > 0.01 then
+
+			local velocity =
+				direction.Unit
+				*
+				SWARM_SPEED
+
+			local nextPosition =
+				currentPosition
+				+
+				velocity
+				*
+				(1 / 60)
+
+			local facing =
+				CFrame.lookAt(
+					nextPosition,
+					nextPosition
+					+
+					direction.Unit
+				)
+
+			pelican:PivotTo(
+				facing
+			)
+
+			lastPosition =
+				nextPosition
+		end
+
+		RunService.Heartbeat:Wait()
+	end
+
+	return lastPosition
+end
+
+-- =========================================================
+-- ROAM
+-- =========================================================
+
+local function roamPelican(
+	pelican,
+	center
+)
+
+	local target =
+		getSkyPosition(
+			center,
+			ROAM_RADIUS
+		)
+
+	while
+		pelican.Parent
+	do
+
+		local current =
+			pelican:GetPivot()
+
+		local position =
+			current.Position
+
+		local direction =
+			target
+			-
+			position
+
+		local distance =
+			direction.Magnitude
+
+		if distance < 100 then
+
+			target =
+				getSkyPosition(
+					center,
+					ROAM_RADIUS
+				)
+
+			continue
+		end
+
+		local movement =
+			math.min(
+				ROAM_SPEED
+				*
+				(1 / 60),
+				distance
+			)
+
+		local directionUnit =
+			direction.Unit
+
+		local nextPosition =
+			position
+			+
+			directionUnit
+			*
+			movement
+
+		-- Slight natural flying motion.
+		local time =
+			os.clock()
+
+		local bob =
+			math.sin(
+				time
+				*
+				0.7
+			)
+			*
+			8
+
+		nextPosition +=
+			Vector3.new(
+				0,
+				bob
+				*
+				(1 / 60),
+				0
+			)
+
+		local targetCF =
+			CFrame.lookAt(
+				nextPosition,
+				nextPosition
+				+
+				directionUnit
+			)
+
+		pelican:PivotTo(
+			current:Lerp(
+				targetCF,
+				0.12
+			)
+		)
+
+		RunService.Heartbeat:Wait()
+	end
+end
+
+-- =========================================================
+-- PROXIMITY CHECK
+-- =========================================================
+
+local lastWarning = 0
+
+local function checkProximity(
+	pelican
+)
 
 	local character =
-		player.Character
+		Player.Character
 
 	if not character then
-		return nil
+		return
 	end
 
 	local root =
@@ -258,368 +658,174 @@ local function createPelican()
 		)
 
 	if not root then
-		return nil
-	end
-
-	local pelican =
-		PelicanTemplate:Clone()
-
-	pelican.Name =
-		"ClientPelican_"
-		.. player.Name
-
-	pelican.Parent =
-		workspace
-
-	-- Scale the COMPLETE pelican correctly.
-	scaleModel(
-		pelican,
-		PELICAN_SCALE
-	)
-
-	makeBlack(
-		pelican
-	)
-
-	-- Hide absolutely anything whose
-	-- name contains "head" or "beak".
-	hideHeadAndBeak(
-		pelican
-	)
-
-	pelican:PivotTo(
-		root.CFrame
-	)
-
-	return pelican
-end
-
--- =========================================================
--- BUILD INFINITE NECK
--- =========================================================
-
-local function buildNeck(pelican)
-
-	-- =====================================================
-	-- FIND NECK3 AND NECK4
-	-- =====================================================
-
-	local neck3 =
-		findObject(
-			pelican,
-			"Neck3"
-		)
-
-	local neck4 =
-		findObject(
-			pelican,
-			"Neck4"
-		)
-
-	if not neck3 then
-
-		warn(
-			"[Infinite Neck] Neck3 was not found."
-		)
-
 		return
 	end
 
-	if not neck4 then
+	local pelicanPosition =
+		pelican:GetPivot().Position
 
-		warn(
-			"[Infinite Neck] Neck4 was not found."
-		)
+	local distance =
+		(
+			root.Position
+			-
+			pelicanPosition
+		).Magnitude
 
-		return
-	end
+	if
+		distance
+		<=
+		WARNING_DISTANCE
+	then
 
-	-- =====================================================
-	-- CONTAINER
-	-- =====================================================
+		local now =
+			os.clock()
 
-	local container =
-		Instance.new("Folder")
+		if
+			now - lastWarning
+			>=
+			WARNING_COOLDOWN
+		then
 
-	container.Name =
-		"ClientInfiniteNeck"
+			lastWarning =
+				now
 
-	container.Parent =
-		pelican
+			-- Standard Roblox RemoteEvent route.
+			--
+			-- This intentionally does NOT use firesignal(),
+			-- because firesignal is an executor-only API.
 
-	-- =====================================================
-	-- HIDE ORIGINAL HEAD/BEAK OBJECTS
-	-- =====================================================
+			local notification =
+				ReplicatedStorage
+				:FindFirstChild(
+					"GUI"
+				)
 
-	hideHeadAndBeak(
-		neck3
-	)
+			if notification then
 
-	hideHeadAndBeak(
-		neck4
-	)
+				notification =
+					notification:FindFirstChild(
+						"ServerNotification"
+					)
 
-	-- =====================================================
-	-- ORIGINAL NECK4 POSITION
-	-- =====================================================
+				if notification
+					and notification:IsA(
+						"RemoteEvent"
+					)
+				then
 
-	local neck4CFrame =
-		getPivot(
-			neck4
-		)
+					-- If the game's server accepts
+					-- this request, it can handle it.
+					pcall(function()
 
-	if not neck4CFrame then
+						notification:FireServer(
+							"An error has encountered."
+						)
 
-		warn(
-			"[Infinite Neck] Could not get Neck4 pivot."
-		)
-
-		return
-	end
-
-	-- =====================================================
-	-- NECK3 SIZE
-	-- =====================================================
-
-	local spacing =
-		getNeckLength(
-			neck3
-		)
-
-	-- =====================================================
-	-- CREATE REPEATING NECK3
-	-- =====================================================
-
-	local segments = {}
-
-	for i = 1, NECK_COUNT do
-
-		local clone =
-			neck3:Clone()
-
-		clone.Name =
-			"Neck3_Infinite_"
-			.. string.format(
-				"%03d",
-				i
-			)
-
-		clone.Parent =
-			container
-
-		-- Keep the same size as the original Neck3.
-		-- No additional scaling here.
-
-		makeBlack(
-			clone
-		)
-
-		hideHeadAndBeak(
-			clone
-		)
-
-		-- =================================================
-		-- STACK DIRECTLY ON NECK4
-		-- =================================================
-
-		local distance =
-			spacing
-			*
-			(i - 1)
-
-		local target =
-			neck4CFrame
-			*
-			CFrame.new(
-				0,
-				distance,
-				0
-			)
-
-		setPivot(
-			clone,
-			target
-		)
-
-		table.insert(
-			segments,
-			{
-				object = clone,
-				index = i
-			}
-		)
-	end
-
-	-- =====================================================
-	-- HIDE ORIGINAL NECK3
-	-- =====================================================
-
-	-- The original Neck3 is replaced by the generated chain.
-	if neck3:IsA("BasePart") then
-		neck3.Transparency = 1
-
-	elseif neck3:IsA("Model") then
-
-		for _, object in ipairs(
-			neck3:GetDescendants()
-		) do
-
-			if object:IsA("BasePart") then
-				object.Transparency = 1
+					end)
+				end
 			end
 		end
 	end
+end
+
+-- =========================================================
+-- MAIN
+-- =========================================================
+
+local function start()
+
+	local old =
+		workspace:FindFirstChild(
+			"MassiveSkyPelican"
+		)
+
+	if old then
+		old:Destroy()
+	end
+
+	local pelican =
+		createGiantPelican()
+
+	if not pelican then
+		return
+	end
+
+	local character =
+		Player.Character
+
+	if not character then
+		pelican:Destroy()
+		return
+	end
+
+	local root =
+		character:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if not root then
+		pelican:Destroy()
+		return
+	end
 
 	-- =====================================================
-	-- JOINT-LIKE MOVEMENT
+	-- START HIGH ABOVE PLAYER
+	-- =====================================================
+
+	local startPosition =
+		root.Position
+		+
+		Vector3.new(
+			0,
+			SKY_HEIGHT,
+			0
+		)
+
+	pelican:PivotTo(
+		CFrame.lookAt(
+			startPosition,
+			root.Position
+		)
+	)
+
+	-- =====================================================
+	-- SWARM
 	-- =====================================================
 
 	task.spawn(function()
 
-		local startTime =
-			os.clock()
+		local finalPosition =
+			swarmPelican(
+				pelican,
+				startPosition
+			)
 
-		while
+		if
 			pelican.Parent
-			and
-			container.Parent
-		do
+		then
 
-			local elapsed =
-				os.clock()
-				-
-				startTime
+			-- =================================================
+			-- ROAM AFTER SWARM
+			-- =================================================
 
-			-- Always follow Neck4.
-			local anchor =
-				getPivot(
-					neck4
-				)
+			roamPelican(
+				pelican,
+				root.Position
+			)
+		end
+	end)
 
-			if not anchor then
-				break
-			end
+	-- =====================================================
+	-- PROXIMITY
+	-- =====================================================
 
-			-- =============================================
-			-- MOVE EACH JOINT
-			-- =============================================
+	task.spawn(function()
 
-			for _, data in ipairs(
-				segments
-			) do
+		while pelican.Parent do
 
-				local segment =
-					data.object
-
-				local i =
-					data.index
-
-				if not segment.Parent then
-					continue
-				end
-
-				-- =========================================
-				-- DELAYED WAVE
-				-- =========================================
-
-				local delay =
-					(i - 1)
-					/
-					WAVE_LENGTH
-
-				local wave =
-					elapsed
-					*
-					NECK_SPEED
-					-
-					delay
-
-				-- =========================================
-				-- JOINT ROTATION
-				-- =========================================
-
-				local pitch =
-
-					math.sin(
-						wave
-					)
-					*
-					BEND_X
-
-				local yaw =
-
-					math.sin(
-						wave
-						*
-						0.78
-						+
-						1.1
-					)
-					*
-					BEND_Y
-
-				local roll =
-
-					math.cos(
-						wave
-						*
-						0.63
-						+
-						0.6
-					)
-					*
-					BEND_Z
-
-				-- =========================================
-				-- POSITION
-				-- =========================================
-
-				local distance =
-					spacing
-					*
-					(i - 1)
-
-				local target =
-
-					anchor
-
-					*
-					CFrame.new(
-						0,
-						distance,
-						0
-					)
-
-					*
-					CFrame.Angles(
-						pitch,
-						yaw,
-						roll
-					)
-
-				-- =========================================
-				-- SMOOTH JOINT MOTION
-				-- =========================================
-
-				local current =
-					getPivot(
-						segment
-					)
-
-				if current then
-
-					local smooth =
-						current:Lerp(
-							target,
-							SMOOTHNESS
-						)
-
-					setPivot(
-						segment,
-						smooth
-					)
-				end
-			end
+			checkProximity(
+				pelican
+			)
 
 			RunService.Heartbeat:Wait()
 		end
@@ -627,55 +833,15 @@ local function buildNeck(pelican)
 end
 
 -- =========================================================
--- REMOVE OLD
--- =========================================================
-
-local function clearOld()
-
-	local name =
-		"ClientPelican_"
-		.. player.Name
-
-	for _, object in ipairs(
-		workspace:GetChildren()
-	) do
-
-		if
-			object:IsA("Model")
-			and
-			object.Name == name
-		then
-
-			object:Destroy()
-		end
-	end
-end
-
--- =========================================================
 -- START
 -- =========================================================
 
-local function start()
+if Player.Character then
 
-	clearOld()
-
-	local pelican =
-		createPelican()
-
-	if not pelican then
-		return
-	end
-
-	buildNeck(
-		pelican
+	task.wait(
+		0.5
 	)
-end
 
--- =========================================================
--- INITIAL
--- =========================================================
-
-if player.Character then
 	start()
 end
 
@@ -683,10 +849,12 @@ end
 -- RESPAWN
 -- =========================================================
 
-player.CharacterAdded:Connect(
+Player.CharacterAdded:Connect(
 	function()
 
-		task.wait(0.25)
+		task.wait(
+			1
+		)
 
 		start()
 	end
