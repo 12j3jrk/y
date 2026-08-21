@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local Birds = ReplicatedStorage:WaitForChild("Birds")
 
-local PelicanTemplate = Birds:WaitForChild("Dodo")
+local PelicanTemplate = Birds:WaitForChild("Pelican")
 local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
 -- =========================================================
@@ -181,7 +181,7 @@ local function getBeakCFrame(model)
 	-- Prefer the old Beak2 reference if it exists.
 	local found =
 		model:FindFirstChild(
-			"Head",
+			"Beak2",
 			true
 		)
 
