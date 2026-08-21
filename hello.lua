@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local Birds = ReplicatedStorage:WaitForChild("Birds")
 
-local PelicanTemplate = Birds:WaitForChild("Ostrich")
+local PelicanTemplate = Birds:WaitForChild("Dodo")
 local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
 -- =========================================================
