@@ -16,7 +16,7 @@ local FALLBACK_TO_MODEL_PIVOT = true
 -- Tuning
 local PELICAN_SCALE = 20
 local PENGUIN_SCALE = 10
-local NECK_COUNT = 147
+local NECK_COUNT = 60
 
 -- Reduced from 250 so the penguins sit closer together/inward
 -- instead of stretching into an obvious oval.
