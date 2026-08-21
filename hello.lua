@@ -5,95 +5,249 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local player = Players.LocalPlayer
+local Player = Players.LocalPlayer
 
-local Birds =
-	ReplicatedStorage:WaitForChild("Birds")
+local Birds = ReplicatedStorage:WaitForChild("Birds")
+local PelicanTemplate = Birds:WaitForChild("Pelican")
 
-local PelicanTemplate =
-	Birds:WaitForChild("Pelican")
-
--- =========================================================
+--========================================================--
 -- SETTINGS
--- =========================================================
+--========================================================--
 
--- Smaller than before.
-local PELICAN_SCALE = 35
+-- Large, but not absurdly huge.
+local PELICAN_SCALE = 30
 
--- Starts VERY high.
-local START_HEIGHT = 1400
+-- ALWAYS above the player.
+local SKY_HEIGHT = 900
 
--- Starts this far horizontally from the player.
+-- Distance in front/behind of the player for the zoom.
 local START_DISTANCE = 1800
 
--- =========================================================
--- FLASH-LIKE ZOOM
--- =========================================================
+-- How far it flies across the sky.
+local ZOOM_DISTANCE = 10000
 
--- Extremely fast.
-local ZOOM_SPEED = 2200
+-- VERY fast.
+local ZOOM_SPEED = 2600
 
--- How long the initial zoom lasts.
-local ZOOM_TIME = 5
+-- Small amount of sideways variation.
+local SIDE_OFFSET = 700
 
--- How far it must travel before disappearing.
-local ZOOM_DISTANCE = 9000
-
--- =========================================================
--- ROAM
--- =========================================================
-
-local ROAM_SPEED = 190
+-- After zooming away, roaming speed.
+local ROAM_SPEED = 180
 
 local ROAM_RADIUS = 3000
 
-local ROAM_MIN_HEIGHT = 1000
-local ROAM_MAX_HEIGHT = 1700
+local ROAM_MIN_HEIGHT = 800
+local ROAM_MAX_HEIGHT = 1500
 
--- =========================================================
--- PROXIMITY
--- =========================================================
-
--- Physical distance from the Pelican's actual parts.
+-- Actual physical proximity.
 local WARNING_DISTANCE = 100
 
 local WARNING_COOLDOWN = 3
 
-local lastWarning = 0
+--========================================================--
+-- FIND FLY ANIMATION
+--========================================================--
 
--- =========================================================
--- BLACK
--- =========================================================
-
-local function makeBlack(model)
+local function findFly(model)
 
 	for _, object in ipairs(
 		model:GetDescendants()
 	) do
 
+		if
+			object:IsA("Animation")
+			and
+			string.lower(object.Name) == "fly"
+		then
+
+			return object
+		end
+	end
+
+	return nil
+end
+
+--========================================================--
+-- HUMANOID ANIMATION
+--========================================================--
+
+local function setupFlyAnimation(pelican)
+
+	-- Remove AnimationControllers completely.
+	for _, object in ipairs(
+		pelican:GetDescendants()
+	) do
+
+		if object:IsA("AnimationController") then
+			object:Destroy()
+		end
+	end
+
+	-- Find/create Humanoid.
+	local humanoid =
+		pelican:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	if not humanoid then
+
+		humanoid =
+			Instance.new("Humanoid")
+
+		humanoid.Name = "Humanoid"
+
+		humanoid.Parent =
+			pelican
+	end
+
+	-- Find the original Fly animation.
+	local fly =
+		findFly(pelican)
+
+	if not fly then
+
+		warn(
+			"[Pelican] No Animation named Fly was found."
+		)
+
+		return
+	end
+
+	-- Remove any old Fly copies inside Humanoid.
+	for _, object in ipairs(
+		humanoid:GetChildren()
+	) do
+
+		if
+			object:IsA("Animation")
+			and
+			string.lower(object.Name) == "fly"
+		then
+
+			object:Destroy()
+		end
+	end
+
+	-- Put Fly DIRECTLY inside Humanoid.
+	local humanoidFly =
+		fly:Clone()
+
+	humanoidFly.Name = "Fly"
+	humanoidFly.Parent = humanoid
+
+	-- Animator.
+	local animator =
+		humanoid:FindFirstChildOfClass(
+			"Animator"
+		)
+
+	if not animator then
+
+		animator =
+			Instance.new("Animator")
+
+		animator.Parent =
+			humanoid
+	end
+
+	-- Load animation.
+	local success, track =
+		pcall(function()
+
+			return animator:LoadAnimation(
+				humanoidFly
+			)
+
+		end)
+
+	if not success or not track then
+
+		warn(
+			"[Pelican] Failed to load Fly."
+		)
+
+		return
+	end
+
+	track.Looped = true
+	track.Priority =
+		Enum.AnimationPriority.Action
+
+	track:Play(
+		0,
+		1,
+		1
+	)
+
+	-- Make absolutely sure it starts.
+	task.defer(function()
+
+		if track then
+			track:Play(
+				0,
+				1,
+				1
+			)
+		end
+	end)
+
+	return track
+end
+
+--========================================================--
+-- UNANCHOR
+--========================================================--
+
+local function unanchorPelican(pelican)
+
+	for _, object in ipairs(
+		pelican:GetDescendants()
+	) do
+
 		if object:IsA("BasePart") then
 
-			object.Color =
-				Color3.new(
-					0,
-					0,
-					0
-				)
+			object.Anchored = false
 
-			object.Material =
-				Enum.Material.SmoothPlastic
+			object.CanCollide = false
+			object.CanTouch = false
+			object.CanQuery = false
+
+			object.Massless = true
 		end
 	end
 end
 
--- =========================================================
--- HIDE HEAD / BEAK
--- =========================================================
+--========================================================--
+-- BLACK PELICAN
+--========================================================--
 
-local function hideHeadAndBeak(model)
+local function makeBlack(pelican)
 
 	for _, object in ipairs(
-		model:GetDescendants()
+		pelican:GetDescendants()
+	) do
+
+		if object:IsA("BasePart") then
+
+			object.Color =
+				Color3.new(0, 0, 0)
+
+			object.Material =
+				Enum.Material.SmoothPlastic
+
+		end
+	end
+end
+
+--========================================================--
+-- HIDE HEAD / BEAK
+--========================================================--
+
+local function hideHeadAndBeak(pelican)
+
+	for _, object in ipairs(
+		pelican:GetDescendants()
 	) do
 
 		local name =
@@ -133,159 +287,9 @@ local function hideHeadAndBeak(model)
 	end
 end
 
--- =========================================================
--- HUMANOID ANIMATION SETUP
--- =========================================================
-
-local function setupHumanoidAnimation(
-	pelican
-)
-
-	-- -----------------------------------------------------
-	-- DELETE EVERY ANIMATIONCONTROLLER
-	-- -----------------------------------------------------
-
-	for _, object in ipairs(
-		pelican:GetDescendants()
-	) do
-
-		if object:IsA(
-			"AnimationController"
-		) then
-
-			object:Destroy()
-		end
-	end
-
-	-- -----------------------------------------------------
-	-- GET HUMANOID
-	-- -----------------------------------------------------
-
-	local humanoid =
-		pelican:FindFirstChildOfClass(
-			"Humanoid"
-		)
-
-	if not humanoid then
-
-		humanoid =
-			Instance.new(
-				"Humanoid"
-			)
-
-		humanoid.Name =
-			"Humanoid"
-
-		humanoid.DisplayDistanceType =
-			Enum.HumanoidDisplayDistanceType.None
-
-		humanoid.HealthDisplayType =
-			Enum.HumanoidHealthDisplayType.AlwaysOff
-
-		humanoid.Parent =
-			pelican
-	end
-
-	-- -----------------------------------------------------
-	-- FIND FLY ANYWHERE
-	-- -----------------------------------------------------
-
-	local fly =
-		pelican:FindFirstChild(
-			"Fly",
-			true
-		)
-
-	if not fly
-		or
-		not fly:IsA("Animation")
-	then
-
-		warn(
-			"[Pelican] Fly animation was not found."
-		)
-
-		return
-	end
-
-	-- -----------------------------------------------------
-	-- PUT FLY INSIDE HUMANOID
-	-- -----------------------------------------------------
-
-	if fly.Parent ~= humanoid then
-
-		local flyCopy =
-			fly:Clone()
-
-		flyCopy.Name =
-			"Fly"
-
-		flyCopy.Parent =
-			humanoid
-
-		fly =
-			flyCopy
-	end
-
-	-- -----------------------------------------------------
-	-- FIND ANIMATOR
-	-- -----------------------------------------------------
-
-	local animator =
-		humanoid:FindFirstChildOfClass(
-			"Animator"
-		)
-
-	if not animator then
-
-		animator =
-			Instance.new(
-				"Animator"
-			)
-
-		animator.Parent =
-			humanoid
-	end
-
-	-- -----------------------------------------------------
-	-- PLAY
-	-- -----------------------------------------------------
-
-	local success, track =
-		pcall(function()
-
-			return animator:LoadAnimation(
-				fly
-			)
-
-		end)
-
-	if not success or not track then
-
-		warn(
-			"[Pelican] Could not load Fly animation."
-		)
-
-		return
-	end
-
-	track.Looped = true
-
-	track.Priority =
-		Enum.AnimationPriority.Action
-
-	track:Play(
-		0.05,
-		1,
-		1
-	)
-
-	return track
-end
-
--- =========================================================
+--========================================================--
 -- CREATE PELICAN
--- =========================================================
+--========================================================--
 
 local function createPelican()
 
@@ -305,10 +309,7 @@ local function createPelican()
 		return nil
 	end
 
-	-- -----------------------------------------------------
-	-- SCALE
-	-- -----------------------------------------------------
-
+	-- Scale it.
 	pcall(function()
 
 		pelican:ScaleTo(
@@ -316,10 +317,6 @@ local function createPelican()
 		)
 
 	end)
-
-	-- -----------------------------------------------------
-	-- APPEARANCE
-	-- -----------------------------------------------------
 
 	makeBlack(
 		pelican
@@ -329,25 +326,28 @@ local function createPelican()
 		pelican
 	)
 
-	-- -----------------------------------------------------
-	-- HUMANOID + FLY
-	-- -----------------------------------------------------
+	-- IMPORTANT:
+	-- Do this before animation setup.
+	unanchorPelican(
+		pelican
+	)
 
-	setupHumanoidAnimation(
+	-- Humanoid + Fly.
+	setupFlyAnimation(
 		pelican
 	)
 
 	return pelican
 end
 
--- =========================================================
--- GET PLAYER ROOT
--- =========================================================
+--========================================================--
+-- GET PLAYER
+--========================================================--
 
-local function getPlayerRoot()
+local function getRoot()
 
 	local character =
-		player.Character
+		Player.Character
 
 	if not character then
 		return nil
@@ -358,13 +358,15 @@ local function getPlayerRoot()
 	)
 end
 
--- =========================================================
--- FIND CLOSEST ACTUAL PELICAN PART
--- =========================================================
+--========================================================--
+-- PROXIMITY
+--========================================================--
 
-local function getClosestDistance(
+local lastNotification = 0
+
+local function getClosestPartDistance(
 	pelican,
-	playerPosition
+	position
 )
 
 	local closest =
@@ -380,7 +382,7 @@ local function getClosestDistance(
 				(
 					object.Position
 					-
-					playerPosition
+					position
 				).Magnitude
 
 			if distance < closest then
@@ -392,77 +394,19 @@ local function getClosestDistance(
 	return closest
 end
 
--- =========================================================
--- NOTIFICATION
--- =========================================================
-
-local function notifyPlayer()
-
-	local now =
-		os.clock()
-
-	if
-		now - lastWarning
-		<
-		WARNING_COOLDOWN
-	then
-		return
-	end
-
-	lastWarning =
-		now
-
-	local gui =
-		ReplicatedStorage:FindFirstChild(
-			"GUI"
-		)
-
-	if not gui then
-		return
-	end
-
-	local event =
-		gui:FindFirstChild(
-			"ServerNotification"
-		)
-
-	if not event then
-		return
-	end
-
-	if not event:IsA("RemoteEvent") then
-		return
-	end
-
-	-- Normal Roblox RemoteEvent call.
-	pcall(function()
-
-		event:FireServer(
-			"An error has encountered."
-		)
-
-	end)
-end
-
--- =========================================================
--- PROXIMITY LOOP
--- =========================================================
-
 local function proximityLoop(
 	pelican
 )
 
-	while
-		pelican.Parent
-	do
+	while pelican.Parent do
 
 		local root =
-			getPlayerRoot()
+			getRoot()
 
 		if root then
 
 			local distance =
-				getClosestDistance(
+				getClosestPartDistance(
 					pelican,
 					root.Position
 				)
@@ -473,7 +417,49 @@ local function proximityLoop(
 				WARNING_DISTANCE
 			then
 
-				notifyPlayer()
+				local now =
+					os.clock()
+
+				if
+					now - lastNotification
+					>=
+					WARNING_COOLDOWN
+				then
+
+					lastNotification =
+						now
+
+					-- Normal RemoteEvent attempt.
+					local gui =
+						ReplicatedStorage:FindFirstChild(
+							"GUI"
+						)
+
+					if gui then
+
+						local event =
+							gui:FindFirstChild(
+								"ServerNotification"
+							)
+
+						if
+							event
+							and
+							event:IsA(
+								"RemoteEvent"
+							)
+						then
+
+							pcall(function()
+
+								event:FireServer(
+									"An error has encountered."
+								)
+
+							end)
+						end
+					end
+				end
 			end
 		end
 
@@ -481,160 +467,175 @@ local function proximityLoop(
 	end
 end
 
--- =========================================================
--- INITIAL POSITION
--- =========================================================
+--========================================================--
+-- SKY ZOOM
+--========================================================--
 
-local function getStartPosition(
-	root
-)
-
-	-- Random horizontal direction.
-	local angle =
-		math.random()
-		*
-		math.pi
-		*
-		2
-
-	local direction =
-		Vector3.new(
-			math.cos(angle),
-			0,
-			math.sin(angle)
-		)
-
-	return
-		root.Position
-		+
-		direction
-		*
-		START_DISTANCE
-		+
-		Vector3.new(
-			0,
-			START_HEIGHT,
-			0
-		)
-end
-
--- =========================================================
--- FAST FLASH-LIKE ZOOM
--- =========================================================
-
-local function flashZoom(
+local function skyZoom(
 	pelican,
 	root
 )
 
-	local startPosition =
-		getStartPosition(
-			root
+	-- Direction is HORIZONTAL.
+	-- It does NOT point toward the player.
+
+	local camera =
+		workspace.CurrentCamera
+
+	local horizontalDirection
+
+	if camera then
+
+		horizontalDirection =
+			Vector3.new(
+				camera.CFrame.LookVector.X,
+				0,
+				camera.CFrame.LookVector.Z
+			)
+
+		if horizontalDirection.Magnitude
+			<
+			0.01
+		then
+
+			horizontalDirection =
+				Vector3.new(
+					0,
+					0,
+					-1
+				)
+
+		else
+
+			horizontalDirection =
+				horizontalDirection.Unit
+		end
+
+	else
+
+		horizontalDirection =
+			Vector3.new(
+				0,
+				0,
+				-1
+			)
+	end
+
+	-- Start ABOVE and slightly behind the player.
+	local sideDirection =
+		Vector3.new(
+			-horizontalDirection.Z,
+			0,
+			horizontalDirection.X
 		)
 
-	-- Fly toward a point FAR beyond the player.
-	local direction =
-		(
-			root.Position
-			-
-			startPosition
-		).Unit
+	local startPosition =
 
-	local distanceTravelled =
-		0
+		root.Position
 
-	local startTime =
-		os.clock()
+		+
+		Vector3.new(
+			0,
+			SKY_HEIGHT,
+			0
+		)
 
-	local lastTime =
-		startTime
+		-
+		horizontalDirection
+		*
+		START_DISTANCE
 
-	local targetDistance =
-		ZOOM_DISTANCE
+		+
+		sideDirection
+		*
+		SIDE_OFFSET
 
-	-- Face toward the direction of travel.
+	-- Face horizontally.
 	pelican:PivotTo(
 		CFrame.lookAt(
 			startPosition,
 			startPosition
 			+
-			direction
+			horizontalDirection
 		)
 	)
 
+	local distance =
+		0
+
+	local last =
+		os.clock()
+
+	--====================================================--
+	-- BLAST ACROSS THE SKY
+	--====================================================--
+
 	while
 		pelican.Parent
+		and
+		distance < ZOOM_DISTANCE
 	do
 
 		local now =
 			os.clock()
 
 		local dt =
-			now - lastTime
+			now - last
 
-		lastTime =
+		last =
 			now
 
-		if
-			now - startTime
-			>=
-			ZOOM_TIME
-			or
-			distanceTravelled
-			>=
-			targetDistance
-		then
-
-			break
-		end
-
-		-- HUGE speed.
+		-- Keep speed INSANELY fast.
 		local movement =
-			ZOOM_SPEED
-			*
-			dt
+			ZOOM_SPEED * dt
 
-		distanceTravelled +=
+		distance +=
 			movement
 
 		local current =
 			pelican:GetPivot()
 
-		local position =
+		local nextPosition =
+
 			current.Position
 
-		local nextPosition =
-			position
 			+
-			direction
+			horizontalDirection
 			*
 			movement
 
-		-- Keep the Pelican pointed exactly
-		-- along the flight direction.
-		local target =
+		-- Tiny vertical wave so it doesn't
+		-- look like a perfectly straight line.
+		nextPosition +=
+			Vector3.new(
+				0,
+				math.sin(
+					now * 3
+				)
+				*
+				0.8,
+				0
+			)
+
+		pelican:PivotTo(
+
 			CFrame.lookAt(
 				nextPosition,
 				nextPosition
 				+
-				direction
+				horizontalDirection
 			)
-
-		pelican:PivotTo(
-			target
 		)
 
 		RunService.Heartbeat:Wait()
 	end
-
-	return true
 end
 
--- =========================================================
--- ROAM TARGET
--- =========================================================
+--========================================================--
+-- ROAM
+--========================================================--
 
-local function getRoamTarget(
+local function randomRoamTarget(
 	center
 )
 
@@ -647,39 +648,27 @@ local function getRoamTarget(
 
 	local radius =
 		math.random(
-			1000,
-			ROAM_RADIUS
+			1200,
+			3000
 		)
 
-	local x =
-		math.cos(angle)
-		*
-		radius
+	return center +
 
-	local z =
-		math.sin(angle)
-		*
-		radius
-
-	local y =
-		math.random(
-			ROAM_MIN_HEIGHT,
-			ROAM_MAX_HEIGHT
-		)
-
-	return
-		center
-		+
 		Vector3.new(
-			x,
-			y,
-			z
+			math.cos(angle)
+			*
+			radius,
+
+			math.random(
+				ROAM_MIN_HEIGHT,
+				ROAM_MAX_HEIGHT
+			),
+
+			math.sin(angle)
+			*
+			radius
 		)
 end
-
--- =========================================================
--- HIGH SKY ROAM
--- =========================================================
 
 local function roam(
 	pelican,
@@ -687,13 +676,11 @@ local function roam(
 )
 
 	local target =
-		getRoamTarget(
+		randomRoamTarget(
 			center
 		)
 
-	while
-		pelican.Parent
-	do
+	while pelican.Parent do
 
 		local current =
 			pelican:GetPivot()
@@ -701,80 +688,58 @@ local function roam(
 		local position =
 			current.Position
 
-		local direction =
+		local difference =
 			target
 			-
 			position
 
 		local distance =
-			direction.Magnitude
+			difference.Magnitude
 
-		if distance < 120 then
+		if distance < 150 then
 
 			target =
-				getRoamTarget(
+				randomRoamTarget(
 					center
 				)
 
 			continue
 		end
 
-		local directionUnit =
-			direction.Unit
+		local direction =
+			difference.Unit
 
 		local dt =
 			RunService.Heartbeat:Wait()
 
 		local movement =
 			math.min(
-				ROAM_SPEED
-				*
-				dt,
+				ROAM_SPEED * dt,
 				distance
 			)
 
 		local nextPosition =
 			position
 			+
-			directionUnit
+			direction
 			*
 			movement
 
-		-- Gentle wandering/bobbing.
-		local t =
-			os.clock()
+		pelican:PivotTo(
 
-		nextPosition +=
-			Vector3.new(
-				0,
-				math.sin(
-					t * 0.45
-				)
-				*
-				2,
-				0
-			)
-
-		local targetCF =
 			CFrame.lookAt(
 				nextPosition,
 				nextPosition
 				+
-				directionUnit
-			)
-
-		pelican:PivotTo(
-			current:Lerp(
-				targetCF,
-				0.08
+				direction
 			)
 		)
 	end
 end
 
--- =========================================================
--- MAIN
--- =========================================================
+--========================================================--
+-- START
+--========================================================--
 
 local function start()
 
@@ -788,7 +753,7 @@ local function start()
 	end
 
 	local root =
-		getPlayerRoot()
+		getRoot()
 
 	if not root then
 		return
@@ -801,42 +766,35 @@ local function start()
 		return
 	end
 
-	-- Start far away and high.
-	local startPosition =
-		getStartPosition(
-			root
-		)
-
-	pelican:PivotTo(
-		CFrame.lookAt(
-			startPosition,
-			root.Position
-		)
-	)
-
-	-- Proximity detection runs independently.
+	-- Proximity detection always runs.
 	task.spawn(
 		proximityLoop,
 		pelican
 	)
 
-	-- Initial incredibly fast zoom,
-	-- then permanent high-altitude roaming.
+	--====================================================--
+	-- FLY ABOVE PLAYER
+	--====================================================--
+
 	task.spawn(function()
 
-		flashZoom(
+		-- Give the animation a moment to start.
+		task.wait(0.25)
+
+		-- FAST HORIZONTAL ZOOM.
+		skyZoom(
 			pelican,
 			root
 		)
 
-		if
-			not pelican.Parent
-		then
+		if not pelican.Parent then
 			return
 		end
 
-		-- Once the zoom has gone out of sight,
-		-- switch to wandering.
+		--================================================--
+		-- NOW ROAM FAR AWAY
+		--================================================--
+
 		roam(
 			pelican,
 			root.Position
@@ -844,29 +802,25 @@ local function start()
 	end)
 end
 
--- =========================================================
--- START
--- =========================================================
+--========================================================--
+-- INITIAL
+--========================================================--
 
-if player.Character then
+if Player.Character then
 
-	task.wait(
-		1
-	)
+	task.wait(1)
 
 	start()
 end
 
--- =========================================================
+--========================================================--
 -- RESPAWN
--- =========================================================
+--========================================================--
 
-player.CharacterAdded:Connect(
+Player.CharacterAdded:Connect(
 	function()
 
-		task.wait(
-			1
-		)
+		task.wait(1)
 
 		start()
 	end
