@@ -181,7 +181,7 @@ local function getBeakCFrame(model)
 	-- Prefer the old Beak2 reference if it exists.
 	local found =
 		model:FindFirstChild(
-			"Beak2",
+			"Head",
 			true
 		)
 
