@@ -19,7 +19,7 @@ local FALLBACK_TO_MODEL_PIVOT = true
 local PELICAN_SCALE = 20
 local PENGUIN_SCALE = 10
 
-local NECK_COUNT = 200
+local NECK_COUNT = 677
 
 -- MUCH SHORTER STACK
 -- Lower = penguins sit much closer together.
