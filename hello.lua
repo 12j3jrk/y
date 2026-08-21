@@ -9,54 +9,66 @@ local Birds = ReplicatedStorage:WaitForChild("Birds")
 local PelicanTemplate = Birds:WaitForChild("Pelican")
 local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
--- Try to match the beak part/attachment name inside the Pelican model
+-- =========================================================
+-- SETTINGS
+-- =========================================================
+
 local BEAK_NAME = "Beak2"
 local FALLBACK_TO_MODEL_PIVOT = true
-
--- =========================================================
--- TUNING
--- =========================================================
 
 local PELICAN_SCALE = 20
 local PENGUIN_SCALE = 10
 
-local NECK_COUNT = 53
-local NECK_LENGTH = 250
+local NECK_COUNT = 60
+
+-- MUCH SHORTER STACK
+-- Lower = penguins sit much closer together.
+local NECK_LENGTH = 125
 
 local UPDATE_DT = 0.02
 
--- Motion
+-- Movement
 local INSANE_BASE_SPEED = 4.0
 local ROT_INSANE_STRENGTH = 3.5
 local SWAY_STRENGTH = 1.18
 
 -- =========================================================
--- FADE SETTINGS
+-- FADE
 -- =========================================================
 
--- Last 10 penguins are used for the fade.
--- Penguin #44 = 0 transparency
--- Penguin #53 = 1 transparency
+-- Last 10 penguins fade from:
+-- 0 transparency -> 1 transparency
+--
+-- 51 = 0
+-- 52 = ~0.11
+-- 53 = ~0.22
+-- ...
+-- 59 = ~0.89
+-- 60 = 1
 local FADE_COUNT = 10
 
 -- =========================================================
--- SPACING SETTINGS
+-- STACK TIGHTNESS
 -- =========================================================
 
--- Keeps the penguins from bunching together toward the end.
--- 1 = normal spacing
--- Higher = more separation toward the tail
-local TAIL_SPACING_BOOST = 1.35
+-- Additional multiplier after calculating the compact
+-- total length. This makes the actual penguin-to-penguin
+-- gap even smaller.
+local STACK_TIGHTNESS = 0.72
 
--- Small overall spacing multiplier.
-local BASE_SPACING_MULTIPLIER = 1.05
+-- Keep the very end from collapsing into one another.
+-- This is intentionally small because the stack is supposed
+-- to look extremely tight.
+local TAIL_SPACING_BOOST = 0.10
 
 -- =========================================================
 -- BLACK MODEL
 -- =========================================================
 
 local function setBlack(model)
+
 	for _, inst in ipairs(model:GetDescendants()) do
+
 		if inst:IsA("BasePart") then
 			inst.Color = Color3.new(0, 0, 0)
 
@@ -75,11 +87,14 @@ end
 -- =========================================================
 
 local function setModelTransparency(model, transparency)
+
 	transparency = math.clamp(transparency, 0, 1)
 
 	for _, inst in ipairs(model:GetDescendants()) do
+
 		if inst:IsA("BasePart") then
 			inst.Transparency = transparency
+
 		elseif inst:IsA("Decal") then
 			inst.Transparency = 1
 		end
@@ -91,9 +106,12 @@ end
 -- =========================================================
 
 local function getBeakCFrame(model)
-	local found = model:FindFirstChild(BEAK_NAME, true)
+
+	local found =
+		model:FindFirstChild(BEAK_NAME, true)
 
 	if found then
+
 		if found:IsA("Attachment") then
 			return found.WorldCFrame
 
@@ -110,17 +128,24 @@ local function getBeakCFrame(model)
 end
 
 -- =========================================================
--- MODEL SCALING
+-- SCALE MODEL
 -- =========================================================
 
 local function scaleModel(model, scale)
+
 	local pivot = model:GetPivot()
 
 	for _, inst in ipairs(model:GetDescendants()) do
-		if inst:IsA("BasePart") then
-			local relPos = pivot:PointToObjectSpace(inst.Position)
 
-			inst.Size = inst.Size * scale
+		if inst:IsA("BasePart") then
+
+			local relPos =
+				pivot:PointToObjectSpace(
+					inst.Position
+				)
+
+			inst.Size =
+				inst.Size * scale
 
 			inst.CFrame =
 				pivot
@@ -131,16 +156,19 @@ local function scaleModel(model, scale)
 end
 
 -- =========================================================
--- PENGUIN SIZE ESTIMATION
+-- PENGUIN SIZE
 -- =========================================================
 
-local function estimatePenguinSegmentStep(penguinTemplateClone)
-	local _, size = penguinTemplateClone:GetBoundingBox()
+local function estimatePenguinSegmentStep(model)
 
-	local step = math.max(
-		1,
-		(size.Y + size.Z) * 0.5
-	)
+	local _, size =
+		model:GetBoundingBox()
+
+	local step =
+		math.max(
+			1,
+			(size.Y + size.Z) * 0.5
+		)
 
 	return step
 end
@@ -150,72 +178,106 @@ end
 -- =========================================================
 
 local function clonePelican()
+
 	local char = player.Character
+
 	if not char then
 		return nil
 	end
 
-	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local hrp =
+		char:FindFirstChild("HumanoidRootPart")
+
 	if not hrp then
 		return nil
 	end
 
-	local pelican = PelicanTemplate:Clone()
+	local pelican =
+		PelicanTemplate:Clone()
 
-	pelican.Name = "ClientPelican_" .. player.Name
+	pelican.Name =
+		"ClientPelican_" .. player.Name
+
 	pelican.Parent = workspace
 
 	setBlack(pelican)
-	scaleModel(pelican, PELICAN_SCALE)
 
-	pelican:PivotTo(hrp.CFrame)
+	scaleModel(
+		pelican,
+		PELICAN_SCALE
+	)
+
+	pelican:PivotTo(
+		hrp.CFrame
+	)
 
 	return pelican
 end
 
 -- =========================================================
--- BUILD PENGUIN NECK
+-- BUILD PENGUIN STACK
 -- =========================================================
 
 local function buildNeck(pelican)
 
-	local container = Instance.new("Folder")
-	container.Name = "ClientPenguinNeckStack"
-	container.Parent = pelican
+	local container =
+		Instance.new("Folder")
 
-	local beakCF = getBeakCFrame(pelican)
+	container.Name =
+		"ClientPenguinNeckStack"
+
+	container.Parent =
+		pelican
+
+	local beakCF =
+		getBeakCFrame(pelican)
+
+	local forward =
+		beakCF.LookVector
 
 	-- =====================================================
-	-- CALCULATE PENGUIN SIZE
+	-- ESTIMATE PENGUIN SIZE
 	-- =====================================================
 
-	local temp = PenguinTemplate:Clone()
+	local temp =
+		PenguinTemplate:Clone()
 
 	setBlack(temp)
-	scaleModel(temp, PENGUIN_SCALE)
 
-	local segStep = estimatePenguinSegmentStep(temp)
+	scaleModel(
+		temp,
+		PENGUIN_SCALE
+	)
+
+	local segStep =
+		estimatePenguinSegmentStep(temp)
 
 	temp:Destroy()
 
 	-- =====================================================
-	-- BASE SPACING
+	-- COMPACT BASE STEP
 	-- =====================================================
 
-	local desiredTotal = NECK_LENGTH
+	local desiredTotal =
+		NECK_LENGTH
 
 	local currentTotal =
 		segStep * (NECK_COUNT - 1)
 
 	local lengthScale =
-		(currentTotal > 0)
-		and (desiredTotal / currentTotal)
-		or 1
 
+		(currentTotal > 0)
+		and
+		(desiredTotal / currentTotal)
+		or
+		1
+
+	-- This is the important part:
+	-- stack is intentionally compressed further.
 	local step =
 		segStep
 		* lengthScale
-		* BASE_SPACING_MULTIPLIER
+		* STACK_TIGHTNESS
 
 	-- =====================================================
 	-- CREATE PENGUINS
@@ -225,102 +287,117 @@ local function buildNeck(pelican)
 
 	for i = 1, NECK_COUNT do
 
-		local p = PenguinTemplate:Clone()
+		local p =
+			PenguinTemplate:Clone()
 
-		p.Name = ("Penguin_%02d"):format(i)
-		p.Parent = container
+		p.Name =
+			("Penguin_%02d"):format(i)
+
+		p.Parent =
+			container
 
 		setBlack(p)
-		scaleModel(p, PENGUIN_SCALE)
+
+		scaleModel(
+			p,
+			PENGUIN_SCALE
+		)
 
 		-- =============================================
-		-- PROGRESS ALONG THE NECK
+		-- STACK POSITION
 		-- =============================================
 
 		local alpha =
 			(i - 1)
-			/ math.max(1, NECK_COUNT - 1)
+			/
+			math.max(
+				1,
+				NECK_COUNT - 1
+			)
 
-		-- =============================================
-		-- EXTRA TAIL SPACING
-		--
-		-- The farther toward the end we go,
-		-- the more separation is added.
-		-- This prevents the final bunch from
-		-- collapsing into each other.
-		-- =============================================
+		-- Tiny amount of extra separation toward
+		-- the very end so the last few don't occupy
+		-- the exact same space.
+		local tailMultiplier =
+			1
+			+
+			(
+				alpha
+				* alpha
+				* TAIL_SPACING_BOOST
+			)
 
-		local spacingMultiplier =
-			1 + (alpha * TAIL_SPACING_BOOST)
-
-		-- Use cumulative-style spacing.
-		-- This makes the tail progressively spread out.
 		local dist =
 			step
 			* (i - 1)
-			* (
-				1
-				+ (
-					(alpha * alpha)
-					* TAIL_SPACING_BOOST
-				)
-			)
+			* tailMultiplier
 
 		-- =============================================
-		-- FADE
-		--
-		-- Last 10:
-		-- 44 = 0
-		-- 45 = ~0.11
-		-- 46 = ~0.22
-		-- ...
-		-- 52 = ~0.89
-		-- 53 = 1
+		-- FADE LAST 10
 		-- =============================================
 
 		local transparency = 0
 
 		local fadeStart =
-			NECK_COUNT - FADE_COUNT
+			NECK_COUNT
+			- FADE_COUNT
 
 		if i >= fadeStart then
 
 			local fadeAlpha =
 				(i - fadeStart)
-				/ math.max(1, FADE_COUNT - 1)
+				/
+				math.max(
+					1,
+					FADE_COUNT - 1
+				)
 
 			transparency =
-				math.clamp(fadeAlpha, 0, 1)
+				math.clamp(
+					fadeAlpha,
+					0,
+					1
+				)
 		end
 
-		setModelTransparency(p, transparency)
+		setModelTransparency(
+			p,
+			transparency
+		)
 
 		-- =============================================
 		-- INITIAL POSITION
 		-- =============================================
 
-		local forward = beakCF.LookVector
-
 		local targetCF =
 			beakCF
-			* CFrame.new(-forward * dist)
+			* CFrame.new(
+				-forward * dist
+			)
 
-		p:PivotTo(targetCF)
+		p:PivotTo(
+			targetCF
+		)
 
-		table.insert(penguins, p)
+		table.insert(
+			penguins,
+			p
+		)
 	end
 
 	-- =====================================================
-	-- CONNECTED ANIMATION
+	-- ANIMATION
 	-- =====================================================
 
 	task.spawn(function()
 
-		local t0 = os.clock()
+		local t0 =
+			os.clock()
 
 		while pelican.Parent do
 
-			local t = os.clock() - t0
+			local t =
+				os.clock() - t0
 
 			local currentBeak =
 				getBeakCFrame(pelican)
@@ -328,15 +405,9 @@ local function buildNeck(pelican)
 			local fwd =
 				currentBeak.LookVector
 
-			local right =
-				currentBeak.RightVector
-
-			local up =
-				currentBeak.UpVector
-
-			-- =============================================
+			-- =================================================
 			-- BASE MOTION
-			-- =============================================
+			-- =================================================
 
 			local baseYaw =
 				math.sin(
@@ -344,7 +415,7 @@ local function buildNeck(pelican)
 					* INSANE_BASE_SPEED
 					* 1.1
 				)
-				* 0.7
+				* 0.6
 
 			local basePitch =
 				math.cos(
@@ -352,11 +423,11 @@ local function buildNeck(pelican)
 					* INSANE_BASE_SPEED
 					* 0.9
 				)
-				* 0.5
+				* 0.4
 
-			-- =============================================
-			-- MOVE EACH PENGUIN
-			-- =============================================
+			-- =================================================
+			-- EACH PENGUIN
+			-- =================================================
 
 			for i, p in ipairs(penguins) do
 
@@ -366,106 +437,108 @@ local function buildNeck(pelican)
 
 				local alpha =
 					(i - 1)
-					/ math.max(1, NECK_COUNT - 1)
+					/
+					math.max(
+						1,
+						NECK_COUNT - 1
+					)
 
-				-- Same spacing formula used during creation.
+				-- Same compact spacing used when created.
+				local tailMultiplier =
+					1
+					+
+					(
+						alpha
+						* alpha
+						* TAIL_SPACING_BOOST
+					)
+
 				local dist =
 					step
 					* (i - 1)
-					* (
-						1
-						+ (
-							(alpha * alpha)
-							* TAIL_SPACING_BOOST
-						)
-					)
+					* tailMultiplier
 
-				-- =========================================
-				-- GENTLE SIDE MOVEMENT
+				-- =================================================
+				-- CONTROLLED CURVE
 				--
-				-- No random positional jitter here.
-				-- That was what caused the penguins
-				-- to visually jumble together.
-				-- =========================================
+				-- No random positional movement.
+				-- This keeps the super-short stack clean.
+				-- =================================================
 
 				local sway =
 					math.sin(
 						t
-						* (
+						*
+						(
 							INSANE_BASE_SPEED
 							* 0.8
 						)
-						+ i * 0.35
+						+
+						i * 0.35
 					)
-					* SWAY_STRENGTH
-					* (0.05 + alpha)
-
-				-- =========================================
-				-- ROTATION
-				-- =========================================
+					*
+					SWAY_STRENGTH
+					*
+					(
+						0.03
+						+
+						alpha * 0.08
+					)
 
 				local pitch =
 					(
 						basePitch
-						* (0.2 + alpha)
+						*
+						(0.2 + alpha)
 					)
-					+ sway * 0.2
+					+
+					sway * 0.2
 
 				local yaw =
-					(
-						baseYaw
-						* (0.2 + alpha)
-					)
+					baseYaw
+					*
+					(0.2 + alpha)
 
 				local roll =
 					math.cos(
 						t
-						* INSANE_BASE_SPEED
-						* 1.2
-						+ i * 0.18
+						*
+						INSANE_BASE_SPEED
+						*
+						1.2
+						+
+						i * 0.18
 					)
-					* (
+					*
+					(
 						ROT_INSANE_STRENGTH
-						* 0.02
-						* (0.2 + alpha)
+						*
+						0.02
+						*
+						(0.2 + alpha)
 					)
 
-				-- =========================================
-				-- VERY SMALL CONTROLLED SIDE SWAY
-				-- =========================================
-
-				local sideSway =
-					right
-					* math.sin(
-						t * 1.6
-						+ i * 0.25
-					)
-					* (
-						0.15
-						* alpha
-					)
-
-				-- =========================================
+				-- =================================================
 				-- TARGET
-				-- =========================================
+				-- =================================================
 
 				local target =
+
 					currentBeak
+
 					* CFrame.Angles(
 						pitch,
 						yaw,
 						roll
 					)
+
 					* CFrame.new(
 						-fwd * dist
 					)
-					* CFrame.new(
-						sideSway
-					)
 
-				-- =========================================
+				-- =================================================
 				-- SMOOTH MOVEMENT
-				-- =========================================
+				-- =================================================
 
 				local current =
 					p:GetPivot()
@@ -478,21 +551,29 @@ local function buildNeck(pelican)
 				)
 			end
 
-			task.wait(UPDATE_DT)
+			task.wait(
+				UPDATE_DT
+			)
 		end
 	end)
 end
 
 -- =========================================================
--- CLEAR OLD PELICAN
+-- CLEAR OLD
 -- =========================================================
 
 local function clearOld()
 
-	for _, inst in ipairs(workspace:GetChildren()) do
+	for _, inst in ipairs(
+		workspace:GetChildren()
+	) do
 
-		if inst:IsA("Model")
-			and inst.Name == ("ClientPelican_" .. player.Name) then
+		if
+			inst:IsA("Model")
+			and
+			inst.Name ==
+			("ClientPelican_" .. player.Name)
+		then
 
 			inst:Destroy()
 		end
@@ -514,11 +595,13 @@ local function start()
 		return
 	end
 
-	buildNeck(pelican)
+	buildNeck(
+		pelican
+	)
 end
 
 -- =========================================================
--- INITIAL SPAWN
+-- INITIAL
 -- =========================================================
 
 if player.Character then
