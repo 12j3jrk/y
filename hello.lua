@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local Birds = ReplicatedStorage:WaitForChild("Birds")
 
-local PelicanTemplate = Birds:WaitForChild("Pelican")
+local PelicanTemplate = Birds:WaitForChild("Ostrich")
 local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
 -- =========================================================
@@ -16,7 +16,7 @@ local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 local PELICAN_SCALE = 20
 local PENGUIN_SCALE = 10
 
-local NECK_COUNT = 60
+local NECK_COUNT = 240
 
 -- Tight penguin stack
 local NECK_LENGTH = 220
