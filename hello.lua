@@ -2,41 +2,85 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local Birds = ReplicatedStorage:WaitForChild("Birds")
 
 local PelicanTemplate = Birds:WaitForChild("Pelican")
-local PenguinTemplate = Birds:WaitForChild("PenguinChick")
 
 -- =========================================================
 -- SETTINGS
 -- =========================================================
 
 local PELICAN_SCALE = 20
-local PENGUIN_SCALE = 10
+local NECK_SCALE = 10
 
-local NECK_COUNT = 240
+-- Make the chain extremely long.
+-- Increase this if you literally want more segments.
+local NECK_SEGMENTS = 180
 
--- Tight penguin stack
-local NECK_LENGTH = 220
+-- How slowly the neck moves.
+local NECK_SPEED = 0.42
 
-local UPDATE_DT = 0.02
+-- How much the neck bends.
+local BEND_X = 0.055
+local BEND_Y = 0.075
+local BEND_Z = 0.035
 
--- Movement
-local INSANE_BASE_SPEED = 4.0
-local JITTER_STRENGTH = 3.5
-local ROT_INSANE_STRENGTH = 3.5
-local SWAY_STRENGTH = 1.18
+-- How much movement travels down the neck.
+local WAVE_LENGTH = 18
 
--- Last 10 penguins fade
-local FADE_COUNT = 10
+-- Smoothness.
+local FOLLOW_SPEED = 4
 
 -- =========================================================
--- BLACK MODEL
+-- NAME HIDING
 -- =========================================================
 
-local function setBlack(model)
+local function shouldHide(inst)
+
+	local name = string.lower(inst.Name)
+
+	return
+		string.find(name, "head", 1, true) ~= nil
+		or
+		string.find(name, "beak", 1, true) ~= nil
+end
+
+local function hideHeadAndBeak(model)
+
+	for _, inst in ipairs(model:GetDescendants()) do
+
+		if shouldHide(inst) then
+
+			if inst:IsA("BasePart") then
+				inst.Transparency = 1
+
+			elseif inst:IsA("Decal") then
+				inst.Transparency = 1
+
+			elseif inst:IsA("Texture") then
+				inst.Transparency = 1
+
+			elseif inst:IsA("ParticleEmitter") then
+				inst.Enabled = false
+
+			elseif inst:IsA("Trail") then
+				inst.Enabled = false
+
+			elseif inst:IsA("Beam") then
+				inst.Enabled = false
+			end
+		end
+	end
+end
+
+-- =========================================================
+-- BLACK
+-- =========================================================
+
+local function makeBlack(model)
 
 	for _, inst in ipairs(model:GetDescendants()) do
 
@@ -47,197 +91,148 @@ local function setBlack(model)
 			if inst.Material ~= Enum.Material.Neon then
 				inst.Material = Enum.Material.SmoothPlastic
 			end
-
-		elseif inst:IsA("Decal") then
-
-			inst.Transparency = 1
-
-		elseif inst:IsA("Texture") then
-
-			inst.Transparency = 1
 		end
 	end
 end
 
 -- =========================================================
--- HIDE ANYTHING WITH "BEAK" IN ITS NAME
+-- SAFE MODEL SCALING
 -- =========================================================
 
-local function hideBeakObjects(model)
+local function scaleModel(model, scale)
 
-	for _, inst in ipairs(model:GetDescendants()) do
-
-		local nameLower =
-			string.lower(inst.Name)
-
-		if string.find(
-			nameLower,
-			"beak",
-			1,
-			true
-		) then
-
-			-- Parts
-			if inst:IsA("BasePart") then
-
-				inst.Transparency = 1
-
-			-- Decals
-			elseif inst:IsA("Decal") then
-
-				inst.Transparency = 1
-
-			-- Textures
-			elseif inst:IsA("Texture") then
-
-				inst.Transparency = 1
-
-			-- Particle emitters
-			elseif inst:IsA("ParticleEmitter") then
-
-				inst.Enabled = false
-
-			-- Trails
-			elseif inst:IsA("Trail") then
-
-				inst.Enabled = false
-
-			-- Beams
-			elseif inst:IsA("Beam") then
-
-				inst.Enabled = false
-			end
-		end
+	if not model:IsA("Model") then
+		return
 	end
-end
 
--- =========================================================
--- TRANSPARENCY
--- =========================================================
-
-local function setModelTransparency(
-	model,
-	transparency
-)
-
-	transparency =
-		math.clamp(
-			transparency,
-			0,
-			1
-		)
-
-	for _, inst in ipairs(
-		model:GetDescendants()
-	) do
-
-		if inst:IsA("BasePart") then
-
-			inst.Transparency =
-				transparency
-
-		elseif inst:IsA("Decal") then
-
-			inst.Transparency =
-				transparency
-
-		elseif inst:IsA("Texture") then
-
-			inst.Transparency =
-				transparency
-		end
-	end
-end
-
--- =========================================================
--- CORRECT MODEL SCALING
--- =========================================================
-
-local function scaleModel(
-	model,
-	scale
-)
-
-	-- Roblox's built-in Model scaling
-	-- preserves the model's proportions,
-	-- joints, offsets, and internal layout.
-	--
-	-- This replaces the old manual part-by-part
-	-- CFrame scaling that could distort the pelican.
-
-	if model:IsA("Model") then
-
+	-- Use Roblox's native model scaling.
+	-- This avoids the old manual CFrame distortion.
+	pcall(function()
 		model:ScaleTo(scale)
-
-	end
+	end)
 end
 
 -- =========================================================
--- FIND BEAK POSITION
+-- FIND NECK3 / NECK4
 -- =========================================================
 
-local function getBeakCFrame(model)
+local function findNamedObject(root, wantedName)
 
-	-- Prefer the old Beak2 reference if it exists.
-	local found =
-		model:FindFirstChild(
-			"Beak2",
-			true
-		)
+	local exact = root:FindFirstChild(wantedName, true)
 
-	if found then
+	if exact then
+		return exact
+	end
 
-		if found:IsA("Attachment") then
+	for _, inst in ipairs(root:GetDescendants()) do
 
-			return found.WorldCFrame
-
-		elseif found:IsA("BasePart") then
-
-			return found.CFrame
+		if string.lower(inst.Name) == string.lower(wantedName) then
+			return inst
 		end
 	end
 
-	-- If Beak2 was hidden but still exists,
-	-- its CFrame is still usable.
-
-	return model:GetPivot()
+	return nil
 end
 
 -- =========================================================
--- PENGUIN SIZE
+-- GET WORLD CFRAME
 -- =========================================================
 
-local function estimatePenguinSegmentStep(
-	model
-)
+local function getObjectCFrame(object)
 
-	local _, size =
-		model:GetBoundingBox()
+	if object:IsA("Model") then
+		return object:GetPivot()
 
-	local step =
+	elseif object:IsA("BasePart") then
+		return object.CFrame
+
+	elseif object:IsA("Attachment") then
+		return object.WorldCFrame
+	end
+
+	return nil
+end
+
+-- =========================================================
+-- SET WORLD CFRAME
+-- =========================================================
+
+local function setObjectCFrame(object, cf)
+
+	if object:IsA("Model") then
+
+		object:PivotTo(cf)
+
+	elseif object:IsA("BasePart") then
+
+		object.CFrame = cf
+
+	elseif object:IsA("Attachment") then
+
+		object.WorldCFrame = cf
+	end
+end
+
+-- =========================================================
+-- GET BOUNDING BOX
+-- =========================================================
+
+local function getSize(object)
+
+	if object:IsA("Model") then
+
+		local _, size =
+			object:GetBoundingBox()
+
+		return size
+
+	elseif object:IsA("BasePart") then
+
+		return object.Size
+	end
+
+	return Vector3.one
+end
+
+-- =========================================================
+-- FIND TOP/BOTTOM AXIS
+-- =========================================================
+
+local function getStackDistance(object)
+
+	local size =
+		getSize(object)
+
+	-- The neck is expected to extend vertically.
+	--
+	-- Use Y first, but make sure the value isn't tiny.
+	local height =
 		math.max(
-			1,
-			(size.Y + size.Z) * 0.5
+			math.abs(size.Y),
+			math.abs(size.Z),
+			0.01
 		)
 
-	return step
+	-- Slight overlap makes the repeated pieces
+	-- visually merge instead of showing gaps.
+	return height * 0.92
 end
 
 -- =========================================================
 -- CREATE PELICAN
 -- =========================================================
 
-local function clonePelican()
+local function createPelican()
 
-	local char =
+	local character =
 		player.Character
 
-	if not char then
+	if not character then
 		return nil
 	end
 
 	local hrp =
-		char:FindFirstChild(
+		character:FindFirstChild(
 			"HumanoidRootPart"
 		)
 
@@ -249,38 +244,25 @@ local function clonePelican()
 		PelicanTemplate:Clone()
 
 	pelican.Name =
-		"ClientPelican_"
-		.. player.Name
+		"ClientPelican_" ..
+		player.Name
 
 	pelican.Parent =
 		workspace
 
-	-- =====================================================
-	-- SCALE FIRST
-	-- =====================================================
-
+	-- Correct proportional scaling.
 	scaleModel(
 		pelican,
 		PELICAN_SCALE
 	)
 
-	-- =====================================================
-	-- APPEARANCE
-	-- =====================================================
-
-	setBlack(
+	makeBlack(
 		pelican
 	)
 
-	-- Hide EVERY object containing
-	-- "beak" in its name.
-	hideBeakObjects(
+	hideHeadAndBeak(
 		pelican
 	)
-
-	-- =====================================================
-	-- POSITION
-	-- =====================================================
 
 	pelican:PivotTo(
 		hrp.CFrame
@@ -290,484 +272,370 @@ local function clonePelican()
 end
 
 -- =========================================================
--- BUILD PENGUIN STACK
+-- BUILD NECK
 -- =========================================================
 
-local function buildNeck(
-	pelican
-)
+local function buildInfiniteNeck(pelican)
+
+	local neck3 =
+		findNamedObject(
+			pelican,
+			"Neck3"
+		)
+
+	local neck4 =
+		findNamedObject(
+			pelican,
+			"Neck4"
+		)
+
+	if not neck3 then
+
+		warn(
+			"Could not find Neck3 inside Pelican."
+		)
+
+		return
+	end
+
+	if not neck4 then
+
+		warn(
+			"Could not find Neck4 inside Pelican."
+		)
+
+		return
+	end
+
+	-- =====================================================
+	-- CONTAINER
+	-- =====================================================
 
 	local container =
 		Instance.new("Folder")
 
 	container.Name =
-		"ClientPenguinNeckStack"
+		"ClientInfiniteNeck"
 
 	container.Parent =
 		pelican
 
-	local beakCF =
-		getBeakCFrame(
-			pelican
-		)
-
-	local forward =
-		beakCF.LookVector
-
 	-- =====================================================
-	-- TEMPORARY PENGUIN
+	-- ORIGINAL NECK4
 	-- =====================================================
 
-	local temp =
-		PenguinTemplate:Clone()
+	hideHeadAndBeak(
+		neck4
+	)
 
-	temp.Parent =
-		workspace
+	-- =====================================================
+	-- TEMPLATE NECK3
+	-- =====================================================
+
+	local template =
+		neck3:Clone()
+
+	template.Name =
+		"Neck3_TEMPLATE"
+
+	template.Parent =
+		container
 
 	scaleModel(
-		temp,
-		PENGUIN_SCALE
+		template,
+		NECK_SCALE
 	)
 
-	setBlack(
-		temp
+	makeBlack(
+		template
 	)
 
-	local segStep =
-		estimatePenguinSegmentStep(
-			temp
-		)
+	hideHeadAndBeak(
+		template
+	)
 
-	temp:Destroy()
+	-- We don't want the template itself
+	-- visible in the chain.
+	local templateTransparency = {}
 
-	-- =====================================================
-	-- COMPACT SPACING
-	-- =====================================================
+	for _, inst in ipairs(
+		template:GetDescendants()
+	) do
 
-	local desiredTotal =
-		NECK_LENGTH
+		if inst:IsA("BasePart") then
 
-	local currentTotal =
-		segStep
-		*
-		(NECK_COUNT - 1)
+			templateTransparency[inst] =
+				inst.Transparency
 
-	local lengthScale =
-
-		(currentTotal > 0)
-		and
-		(
-			desiredTotal
-			/
-			currentTotal
-		)
-		or
-		1
-
-	local step =
-		segStep
-		*
-		lengthScale
-
-	-- =====================================================
-	-- CREATE PENGUINS
-	-- =====================================================
-
-	local penguins = {}
-
-	for i = 1, NECK_COUNT do
-
-		local p =
-			PenguinTemplate:Clone()
-
-		p.Name =
-			("Penguin_%02d")
-			:format(i)
-
-		p.Parent =
-			container
-
-		-- Correct proportional scaling
-		scaleModel(
-			p,
-			PENGUIN_SCALE
-		)
-
-		setBlack(
-			p
-		)
-
-		-- Hide beak-named objects
-		hideBeakObjects(
-			p
-		)
-
-		-- =================================================
-		-- POSITION
-		-- =================================================
-
-		local dist =
-			step
-			*
-			(i - 1)
-
-		local targetCF =
-
-			beakCF
-
-			*
-			CFrame.new(
-				-forward * dist
-			)
-
-		p:PivotTo(
-			targetCF
-		)
-
-		-- =================================================
-		-- FADE
-		-- =================================================
-
-		local fadeStart =
-			NECK_COUNT
-			-
-			FADE_COUNT
-
-		if i >= fadeStart then
-
-			local fadeAlpha =
-
-				(i - fadeStart)
-				/
-				math.max(
-					1,
-					FADE_COUNT - 1
-				)
-
-			setModelTransparency(
-				p,
-				math.clamp(
-					fadeAlpha,
-					0,
-					1
-				)
-			)
+			inst.Transparency = 1
 		end
-
-		table.insert(
-			penguins,
-			p
-		)
 	end
 
 	-- =====================================================
-	-- CONNECTED ANIMATION
+	-- START POSITION
+	-- =====================================================
+
+	local neck4CF =
+		getObjectCFrame(
+			neck4
+		)
+
+	if not neck4CF then
+		return
+	end
+
+	-- =====================================================
+	-- SEGMENT DISTANCE
+	-- =====================================================
+
+	local segmentDistance =
+		getStackDistance(
+			template
+		)
+
+	-- =====================================================
+	-- CREATE CHAIN
+	-- =====================================================
+
+	local segments = {}
+
+	for i = 1, NECK_SEGMENTS do
+
+		local segment =
+			neck3:Clone()
+
+		segment.Name =
+			"Neck3_Infinite_" ..
+			string.format(
+				"%03d",
+				i
+			)
+
+		segment.Parent =
+			container
+
+		-- Correct scale.
+		scaleModel(
+			segment,
+			NECK_SCALE
+		)
+
+		makeBlack(
+			segment
+		)
+
+		hideHeadAndBeak(
+			segment
+		)
+
+		-- =================================================
+		-- STACK
+		-- =================================================
+
+		local distance =
+			segmentDistance
+			*
+			(i - 1)
+
+		local target =
+			neck4CF
+			*
+			CFrame.new(
+				0,
+				distance,
+				0
+			)
+
+		setObjectCFrame(
+			segment,
+			target
+		)
+
+		table.insert(
+			segments,
+			{
+				model = segment,
+				index = i,
+				base = target
+			}
+		)
+	end
+
+	template:Destroy()
+
+	-- =====================================================
+	-- JOINT-LIKE MOTION
 	-- =====================================================
 
 	task.spawn(function()
 
-		local t0 =
+		local startTime =
 			os.clock()
 
-		while pelican.Parent do
+		while
+			pelican.Parent
+			and
+			container.Parent
+		do
 
-			local t =
+			local now =
 				os.clock()
-				-
-				t0
 
-			local currentBeak =
-				getBeakCFrame(
-					pelican
+			local elapsed =
+				now - startTime
+
+			-- Current Neck4 position is the anchor.
+			local currentNeck4 =
+				getObjectCFrame(
+					neck4
 				)
 
-			local fwd =
-				currentBeak.LookVector
+			if not currentNeck4 then
+				break
+			end
 
-			local right =
-				currentBeak.RightVector
-
-			local up =
-				currentBeak.UpVector
-
-			-- =================================================
-			-- BASE MOTION
-			-- =================================================
-
-			local baseYaw =
-
-				math.sin(
-					t
-					*
-					INSANE_BASE_SPEED
-					*
-					1.1
-				)
-				*
-				(
-					0.6
-					+
-					math.random()
-					*
-					0.6
-				)
-
-			local basePitch =
-
-				math.cos(
-					t
-					*
-					INSANE_BASE_SPEED
-					*
-					0.9
-				)
-				*
-				(
-					0.4
-					+
-					math.random()
-					*
-					0.6
-				)
-
-			-- =================================================
-			-- PENGUINS
-			-- =================================================
-
-			for i, p in ipairs(
-				penguins
+			for _, data in ipairs(
+				segments
 			) do
 
-				if not p.Parent then
-					break
+				local segment =
+					data.model
+
+				if not segment.Parent then
+					continue
 				end
 
-				local alpha =
+				local i =
+					data.index
 
+				-- =============================================
+				-- WAVE DELAY
+				-- =============================================
+
+				local waveOffset =
 					(i - 1)
 					/
-					math.max(
-						1,
-						NECK_COUNT - 1
+					WAVE_LENGTH
+
+				-- =============================================
+				-- SLOW JOINT MOTION
+				-- =============================================
+
+				local waveTime =
+					elapsed
+					*
+					NECK_SPEED
+					-
+					waveOffset
+
+				-- Several overlapping waves make it
+				-- look like individual joints following
+				-- the one above them.
+				local x =
+					math.sin(
+						waveTime
 					)
+					*
+					BEND_X
+					*
+					(0.35 + i / NECK_SEGMENTS)
 
-				local dist =
+				local y =
+					math.sin(
+						waveTime
+						* 0.73
+						+ 1.7
+					)
+					*
+					BEND_Y
+					*
+					(0.35 + i / NECK_SEGMENTS)
 
-					step
+				local z =
+					math.cos(
+						waveTime
+						* 0.58
+						+ 0.8
+					)
+					*
+					BEND_Z
+					*
+					(0.35 + i / NECK_SEGMENTS)
+
+				-- =============================================
+				-- POSITION ALONG NECK4'S AXIS
+				-- =============================================
+
+				local distance =
+					segmentDistance
 					*
 					(i - 1)
-
-				-- =================================================
-				-- RANDOM SHAKE
-				-- =================================================
-
-				local randX =
-					(math.random() - 0.5)
-					*
-					2
-
-				local randY =
-					(math.random() - 0.5)
-					*
-					2
-
-				local randZ =
-					(math.random() - 0.5)
-					*
-					2
-
-				local jitterPos =
-
-					(
-						right
-						*
-						randX
-						+
-						up
-						*
-						randY
-					)
-					*
-					(
-						JITTER_STRENGTH
-						*
-						(
-							0.1
-							+
-							alpha
-						)
-					)
-
-				local jitterRotYaw =
-
-					(
-						math.sin(
-							t
-							*
-							INSANE_BASE_SPEED
-							+
-							i
-							*
-							0.25
-						)
-						+
-						randZ
-					)
-					*
-					(
-						ROT_INSANE_STRENGTH
-						*
-						0.02
-						*
-						(
-							0.2
-							+
-							alpha
-						)
-					)
-
-				local jitterRotRoll =
-
-					(
-						math.cos(
-							t
-							*
-							INSANE_BASE_SPEED
-							*
-							1.2
-							+
-							i
-							*
-							0.18
-						)
-						+
-						randY
-					)
-					*
-					(
-						ROT_INSANE_STRENGTH
-						*
-						0.02
-						*
-						(
-							0.2
-							+
-							alpha
-						)
-					)
-
-				-- =================================================
-				-- CURVE
-				-- =================================================
-
-				local sway =
-
-					math.sin(
-						t
-						*
-						(
-							INSANE_BASE_SPEED
-							*
-							0.8
-						)
-						+
-						i
-						*
-						0.35
-					)
-					*
-					SWAY_STRENGTH
-					*
-					(
-						0.05
-						+
-						alpha
-					)
-
-				local pitch =
-
-					(
-						basePitch
-						*
-						(
-							0.2
-							+
-							alpha
-						)
-					)
-					+
-					sway
-					*
-					0.2
-
-				local yaw =
-
-					(
-						baseYaw
-						*
-						(
-							0.2
-							+
-							alpha
-						)
-					)
-					+
-					jitterRotYaw
-
-				-- =================================================
-				-- TARGET
-				-- =================================================
 
 				local target =
 
-					currentBeak
+					currentNeck4
+
+					*
+					CFrame.new(
+						0,
+						distance,
+						0
+					)
 
 					*
 					CFrame.Angles(
-						pitch,
-						yaw,
-						jitterRotRoll
+						x,
+						y,
+						z
 					)
 
-					*
-					CFrame.new(
-						-fwd
-						*
-						dist
-					)
-
-					*
-					CFrame.new(
-						jitterPos
-					)
-
-				-- =================================================
-				-- SMOOTH MOVEMENT
-				-- =================================================
+				-- =============================================
+				-- FOLLOWING MOTION
+				-- =============================================
 
 				local current =
-					p:GetPivot()
-
-				p:PivotTo(
-					current:Lerp(
-						target,
-						0.18
+					getObjectCFrame(
+						segment
 					)
-				)
+
+				if current then
+
+					local alpha =
+						math.clamp(
+							FOLLOW_SPEED
+							*
+							0.02,
+							0,
+							1
+						)
+
+					local smooth =
+						current:Lerp(
+							target,
+							alpha
+						)
+
+					setObjectCFrame(
+						segment,
+						smooth
+					)
+				end
 			end
 
-			task.wait(
-				UPDATE_DT
-			)
+			RunService.Heartbeat:Wait()
 		end
 	end)
 end
 
 -- =========================================================
--- CLEAR OLD PELICAN
+-- CLEAR OLD
 -- =========================================================
 
 local function clearOld()
+
+	local oldName =
+		"ClientPelican_" ..
+		player.Name
 
 	for _, inst in ipairs(
 		workspace:GetChildren()
@@ -776,12 +644,7 @@ local function clearOld()
 		if
 			inst:IsA("Model")
 			and
-			inst.Name ==
-			(
-				"ClientPelican_"
-				..
-				player.Name
-			)
+			inst.Name == oldName
 		then
 
 			inst:Destroy()
@@ -798,13 +661,13 @@ local function start()
 	clearOld()
 
 	local pelican =
-		clonePelican()
+		createPelican()
 
 	if not pelican then
 		return
 	end
 
-	buildNeck(
+	buildInfiniteNeck(
 		pelican
 	)
 end
@@ -824,9 +687,7 @@ end
 player.CharacterAdded:Connect(
 	function()
 
-		task.wait(
-			0.2
-		)
+		task.wait(0.25)
 
 		start()
 	end
